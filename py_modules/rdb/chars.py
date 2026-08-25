@@ -14,6 +14,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..rfp import RFP
 
+from .. import b_funcs as bf
+import bpy
+
 #Class CharItemFlag(Enum):
 
 @dataclass
@@ -27,6 +30,10 @@ class CharItem:
         return CharItem(item_id = item_id,
                         item = get_db_entry(file, db_dict, 'get_item', item_id),
                         flag = read_uints(file,1))
+    def to_inst(self, rfp: RFP, inst) -> None:
+        inst.item_id = self.item_id
+        inst.item = self.item.to_objs(rfp, None)[0] if self.item else None
+        inst.flag = self.flag
     def clear(self) -> None:
         self.item_id,self.item = 0,None
     def write(self, owner_idb: ItemDB, uidb: ItemDB, as_local: bool) -> bytes:
@@ -35,6 +42,21 @@ class CharItem:
         return d + write_uint(self.flag)
     def __repr__(self):
         return f'CharItem(item_id={hex(self.item_id)}, item={self.item}, flag={hex(self.flag)})'
+
+@dataclass
+class InventoryItem:
+    charitem: CharItem = field(default_factory = CharItem)
+    loc: tuple[int,int] = (0,0)
+    @classmethod
+    def parse(cls, file: BufferedReader, db_dict: dict[int,ItemDB]) -> InventoryItem:
+        return InventoryItem(charitem = CharItem.parse(file, db_dict),
+                             loc = read_sshorts(file,2))
+    def to_inst(self, rfp: RFP, inst) -> None:
+        self.charitem.to_inst(rfp, inst.charitem)
+        inst.pos_x,inst.pos_y = self.loc
+    def write(self, owner_idb: ItemDB, uidb: ItemDB, as_local: bool) -> bytes:
+        return self.charitem.write(owner_idb = owner_idb, uidb = uidb, as_local = as_local) + write_sshorts(self.loc)
+
 
 from enum import Enum
 
@@ -126,19 +148,17 @@ class Skill:
         return Skill(category = category,
                      xp = xp,
                      abilities = [skill_cls(read_ubytes(file,1)) for _ in range(abilities_n)])
+    def to_obj(self, obj: bpy.types.Object) -> None:
+        s = obj.x_char.skills.add()
+        s.xp = self.xp
+        s.group_type = self.category.name
+        s.skills.clear()
+        for _ in range(5): s.skills.add()
+        for i,ability in enumerate(self.abilities):
+            setattr(s.skills[i],self.category.name,ability.name)
+        
     def write(self) -> bytes:
         return write_ushorts((self.category.value,self.xp)) + write_ubyte(len(self.abilities)) + write_ubytes([a.value for a in self.abilities])
-
-@dataclass
-class InventoryItem:
-    charitem: CharItem = field(default_factory = CharItem)
-    loc: tuple[int,int] = (0,0)
-    @classmethod
-    def parse(cls, file: BufferedReader, db_dict: dict[int,ItemDB]) -> InventoryItem:
-        return InventoryItem(charitem = CharItem.parse(file, db_dict),
-                             loc = read_sshorts(file,2))
-    def write(self, owner_idb: ItemDB, uidb: ItemDB, as_local: bool) -> bytes:
-        return self.charitem.write(owner_idb = owner_idb, uidb = uidb, as_local = as_local) + write_sshorts(self.loc)
 
 @dataclass
 class Relation:
@@ -150,12 +170,18 @@ class Relation:
     @classmethod
     def parse(cls, file: BufferedReader, chardb_dict: dict[int,CharDB], itemdb_dict: dict[int,ItemDB], char_id: int) -> Relation:
         length = read_uints(file,1)
+        if not isinstance(chardb_dict,dict): raise Exception(f'Somehow the chardb dict became {type(chardb_dict)}')
         cdb = chardb_dict.get(char_id)
         return Relation(char_id = char_id,
                         char = cdb.get_char(char_id, chardb_dict, itemdb_dict) if cdb else None,
                         type = read_uints(file,1),
                         reputation = read_floats(file,1),
                         unk = file.read(length - 8))
+    def to_inst(self, rfp: RFP, inst):
+        if self.char: inst.char = self.char.to_objs(rfp, None) #Only linke them to a col if they're placed.
+        else:         inst.char_id = self.char_id
+        inst.rel_type,inst.reputation = hex(self.type),self.reputation
+        inst.unk = self.unk.hex()
     def write(self, owner_cdb: CharDB, owner_idb: ItemDB, uidb: ItemDB, as_local: bool) -> tuple[int,bytes]:
         char_id = self.char.write(owner_cdb = owner_cdb, owner_idb = owner_idb, uidb = uidb, return_id = True, as_local = as_local) if self.char else self.char_id
         d = write_uint(self.type) + write_float(self.reputation) + self.unk
@@ -207,11 +233,17 @@ class LocaleRelation:
     unk:       int = 0
     relations: list[Relation] = field(default_factory = list)
     @classmethod
-    def parse(cls, file: BufferedReader, lcdb: CharDB) -> LocaleRelation:
+    def parse(cls, file: BufferedReader, chardb_dict: dict[int,CharDB]) -> LocaleRelation:
         locale_id, unk = read_uints(file,2)
         return LocaleRelation(locale_id = locale_id,
                               unk       = unk,
-                              relations = read_relations(file, lcdb, locale_id))
+                              relations = read_relations(file, chardb_dict, locale_id))
+    def to_inst(self, rfp: RFP, inst) -> None:
+        inst.locale_id = self.locale_id
+        inst.unk = self.unk
+        inst.relations.clear()
+        for rel in self.relations:
+            rel.to_inst(rfp, inst.relations.add())
     def write(self, lcdb: CharDB, uidb: int, as_local: bool) -> bytes:
         return write_uints((self.locale_id, self.unk)) + write_relations(self.relations,lcdb,uidb,as_local)
 
@@ -230,6 +262,9 @@ class Condition:
         else: remainder = read_floats(file,1)
         return Condition(type      = type,
                          remainder = remainder)
+    def to_inst(self, inst) -> None:
+        inst.cond_type = self.type.name
+        inst.remainder = float(self.remainder)
     def write(self) -> bytes:
         d = write_uint(self.type.value)
         if self.type == ConditionType.Elixir: return d + write_uint(self.remainder)
@@ -251,6 +286,15 @@ class Loadout:
                        alt_hand_r = CharItem.parse(file, db_dict),
                        alt_hand_l = CharItem.parse(file, db_dict),
                        apparel    = [CharItem.parse(file, db_dict) for _ in range(read_uints(file,1))])
+    def to_inst(self, rfp: RFP, inst) -> None:
+        inst.a = self.a
+        self.hand_r.to_inst(rfp,inst.hand_r)
+        self.hand_l.to_inst(rfp,inst.hand_l)
+        self.alt_hand_r.to_inst(rfp,inst.alt_hand_r)
+        self.alt_hand_l.to_inst(rfp,inst.alt_hand_l)
+        inst.apparel.clear()
+        for app in self.apparel:
+            app.to_inst(rfp, inst.apparel.add())
     def write(self, owner_idb: ItemDB, uidb: ItemDB, as_local: bool) -> bytes:
         d = write_uint(self.a)
         d += self.hand_r.write(owner_idb,uidb,as_local) + self.hand_l.write(owner_idb,uidb,as_local) + self.alt_hand_r.write(owner_idb,uidb,as_local) + self.alt_hand_l.write(owner_idb,uidb,as_local)
@@ -271,6 +315,12 @@ class Loadouts:
     def parse(cls, file: BufferedReader, db_dict: dict[int,ItemDB]) -> Loadouts:
         length = read_uints(file,1)
         return Loadouts(loadouts = [Loadout.parse(file, db_dict) for _ in range(read_uints(file,1))])
+    def to_obj(self, rfp: RFP, obj: bpy.types.Object) -> None:
+        l = obj.x_char.loadouts
+        l.bool = True
+        l.loadouts.clear()
+        for loadout in self.loadouts:
+            loadout.to_inst(rfp, l.loadouts.add())
     def write(self, owner_idb: ItemDB, uidb: ItemDB, as_local: bool) -> bytes:
         d = write_uint(len(self.loadouts))
         for loadout in self.loadouts: d += loadout.write(owner_idb = owner_idb, uidb = uidb, as_local = as_local)
@@ -278,6 +328,12 @@ class Loadouts:
 
 from ..pwr import PowerNode
 from struct import unpack
+
+temp_spell_id_to_name_dict: dict[int,str] = {
+    0x602:   'Longdoor',
+    0x20603: 'Phase',
+    0x604:   'Summon Demon'
+}
 
 @dataclass
 class KeyboundSpell:
@@ -299,6 +355,11 @@ class KeyboundSpell:
         return KeyboundSpell(spell_id = unpack('<I',b)[0],
                              spell = pwr_tree.power_dict.get(power_index) if pwr_tree else None,
                              is_active = bool(is_active))
+    def to_inst(self, inst) -> None:
+        inst.spell_id = self.spell_id
+        if self.spell: inst.name = self.spell.name
+        elif self.spell_id in temp_spell_id_to_name_dict: inst.name = temp_spell_id_to_name_dict[self.spell_id]
+        inst.is_active = self.is_active
     def write(self) -> bytes:
         if spell := self.spell:
             d = bytes([spell.power_index,
@@ -333,6 +394,11 @@ class KnownSpell:
                           xp = (xp & (~0x00004000)) & (~0x00010000),
                           empowered = bool(xp & 0x00004000),
                           no_prereqs = bool(xp & 0x00010000))
+    def to_inst(self, inst) -> None:
+        inst.spell_id = self.spell_id
+        if self.spell: inst.name = self.spell.name
+        elif self.spell_id in temp_spell_id_to_name_dict: inst.name = temp_spell_id_to_name_dict[self.spell_id]
+        inst.xp,inst.empowered,inst.no_prereqs = self.xp,self.empowered,self.no_prereqs
     def write(self, *args, **kwargs) -> bytes:
         if spell := self.spell:
             d = bytes([spell.power_index,
@@ -358,6 +424,16 @@ class Thaumaturgy:
                            potential = read_floats(file,1) if version == 0x1 else read_uints(file,1),
                            keybound_spells = [KeyboundSpell.parse(file, rfp) for _ in range(10)],
                            spells          = [KnownSpell.parse(file, rfp) for _ in range(read_uints(file,1))])
+    def to_obj(self, obj: bpy.types.Object) -> None:
+        t = obj.x_char.thaumaturgy
+        t.bool = True
+        t.version,t.potential = self.version,float(self.potential)
+        t.keybound_spells.clear()
+        for kb_s in self.keybound_spells:
+            kb_s.to_inst(t.keybound_spells.add())
+        t.spells.clear()
+        for spell in self.spells:
+            spell.to_inst(t.spells.add())
     def write(self, *args, **kwargs) -> bytes:
         d = write_float(self.potential) if self.version == 0x1 else write_uint(self.potential)
         for kb_spell in self.keybound_spells: d += kb_spell.write()
@@ -404,7 +480,7 @@ class Character:
     health:  int = 0 #H
     focus_stamina: int = 0 #H
     focus_health:  int = 0 #H
-    combat_skill: int = 0 #L f?
+    combat_skill: float = 0.0 #L f?
     undead_voice: int = 0 #L
     trustfulness: int = 0 #B
     bravery:      int = 0 #B
@@ -473,7 +549,7 @@ class Character:
             for _ in range(read_uints(file,1)): file.read(0x10)
         global_relations,locale_relations = [],[]
         if version >= 6:
-            global_relations = read_relations(file, owner_cdb, 0)
+            global_relations = read_relations(file, chardb_dict, 0)
             locale_relations = [LocaleRelation.parse(file, chardb_dict) for _ in range(read_uints(file,1))]
         conditions = [Condition.parse(file) for _ in range(read_uints(file,1))] if version > 5 else []
         loadouts,thaumaturgy = [],None
@@ -492,7 +568,7 @@ class Character:
                          face_style0 = face_style0, face_style1 = face_style1,
                          voice = voice, voice_pitch = voice_pitch,
                          gender = gender, 
-                         race = racedb.get_race(race_id+1), #rfp.old_race_names[race_id], 
+                         race = racedb.get_race(rfp, race_id+1), #rfp.old_race_names[race_id], 
                          hair_flags = hair_flags, loadout = loadout,
                          last_locale = last_locale,
                          hand_r = hand_r, hand_l = hand_l,
@@ -514,6 +590,76 @@ class Character:
     def __post_init__(self) -> None:
         self.internal_id = Character.created_chars
         Character.created_chars += 1
+    def to_objs(self, rfp: RFP, col: bpy.types.Collection | None = None) -> bpy.types.Object:
+        '''
+        Creates the objects and links them to the provided collection.
+        Will copy the objects if already in the collection if the collection is provided. 
+        If no collection is provided, it will provide the original regardless of any pre-existing links.
+        '''
+        #Return the 0th instance first if it isnt in the collection... and then copy it if it's already in there
+        objs = self.race.model
+        if self in rfp.built_chars:
+            if col:
+                objs = rfp.built_chars[self]
+                if objs[0].name not in col.objects:
+                    for obj in objs: col.objects.link(obj)
+                    return objs
+                copies = bf.copy_objects(objs, col)
+                return copies
+            else: return rfp.built_chars[self]
+        else: objs = bf.copy_objects(objs, col) #The race objects should always be
+        rfp.built_chars[self] = objs #Important to prevent infinite recursions and lets us pose things in the 3d viewport
+        obj = objs[0]
+        c = obj.x_char
+        c.version = self.version
+        c.name,c.surname = self.name,self.surname
+        c.muscle,c.fat,c.height,c.age = self.muscle,self.fat,self.height,self.age
+        c.skin_x,c.skin_y = self.skin_x,self.skin_y
+        c.hair_style = self.hair_style
+        c.hair_x,c.hair_y,c.hair_suppress,c.hair_null = self.hair_x,self.hair_y,self.hair_suppress,self.hair_null
+        c.face_style0,c.face_style1 = self.face_style0,self.face_style1
+        c.voice,c.voice_pitch = self.voice,self.voice_pitch
+        c.gender,c.hair_flags,c.loadout = self.gender,self.hair_flags,self.loadout
+        self.race.to_obj(obj)
+        c.last_locale = self.last_locale
+        self.hand_r.to_inst(rfp,c.hand_r)
+        self.hand_l.to_inst(rfp,c.hand_l)
+        self.alt_hand_r.to_inst(rfp,c.alt_hand_r)
+        self.alt_hand_l.to_inst(rfp,c.alt_hand_l)
+        c.apparel.clear()
+        for app in self.apparel:
+            app.to_inst(rfp,c.apparel.add())
+        c.zombification = self.zombification
+        c.stamina,c.health = self.stamina,self.health
+        c.focus_stamina,c.focus_health = self.stamina,self.focus_health
+        c.combat_skill,c.undead_voice = self.combat_skill,self.undead_voice
+        c.trustfulness,c.bravery,c.ben_ach,c.neuroticism = self.trustfulness,self.bravery,self.ben_ach,self.neuroticism
+        c.rng_seed,c.raw_xp,c.null = hex(self.rng_seed),self.raw_xp,self.null
+        c.skills.clear()
+        for skill in self.skills:
+            skill.to_obj(obj)
+        c.inventory.clear()
+        for iitem in self.inventory:
+            iitem.to_inst(rfp,c.inventory.add())
+        c.old_roles.clear()
+        for o_role_inst in self.old_roles:
+            o_role_inst.to_inst(c.old_roles.add())
+        c.roles.clear()
+        for role_inst in self.roles:
+            role_inst.to_inst(c.roles.add())
+        c_g_rels = c.global_relations.relations
+        c_g_rels.clear()
+        for g_rel in self.global_relations:
+            g_rel.to_inst(rfp, c_g_rels.add())
+        c.locale_relations.clear()
+        for l_rel in self.locale_relations:
+            l_rel.to_inst(rfp, c.locale_relations.add())
+        c.conditions.clear()
+        for cond in self.conditions:
+            cond.to_inst(c.conditions.add())
+        if self.loadouts:    self.loadouts.to_obj(rfp, obj)
+        if self.thaumaturgy: self.thaumaturgy.to_obj(obj)
+        return objs
     def __hash__(self):
         return self.internal_id
     def __repr__(self) -> str:
@@ -647,6 +793,22 @@ class Character:
         elif return_data: return owner_cdb.w_chars[self]
 
 @dataclass
+class NewPose:
+    tmatrix: Matrix = Matrix
+    bone_index: int = 0
+    children: list[NewPose] = field(default_factory = list)
+    @classmethod
+    def parse(cls, file: BufferedReader) -> NewPose:
+        return NewPose(tmatrix    = read_x_tmatrix(file),
+                       bone_index = read_uints(file,1),
+                       children   = [NewPose.parse(file) for _ in range(read_uints(file,1))])
+    def pose(self, bone_dict: dict[int,bpy.types.Object], recursion: int = 0) -> None:
+        if self.bone_index in bone_dict:
+            bone_dict[self.bone_index].matrix_world = self.tmatrix
+        for child in self.children:
+            child.pose(bone_dict, recursion + 1)
+
+@dataclass
 class PlacedChar:
     char_id: int = 0x0
     char:    Character | None = None
@@ -654,27 +816,25 @@ class PlacedChar:
     rot:     float = 0.0
     state:   int = 0x0
     pose_sig: int = 0xCAC0E100
-    pose:    list[Matrix] | None = None,
-    pose_unks: tuple[int,int] = (0,0)
+    pose:    list[Matrix] | NewPose | None = None
     unk: bytes = b''
     @classmethod
     def parse(cls, file: BufferedReader, chardb_dict: dict[int,CharDB], itemdb_dict: dict[int,ItemDB], length: int) -> PlacedChar:
         start = file.tell()
         char_id = read_uints(file,1)
-        # print(f'Searching for character {char_id & 0xFFFFFF}')
         chardb = chardb_dict.get(char_id & 0xFF000000)
         char = chardb.get_char(id = char_id, chardb_dict = chardb_dict, itemdb_dict = itemdb_dict) if chardb else None
         pos = read_3dfvec(file)
         rot = read_floats(file,1)
         state = read_uints(file,1)
-        pose,pose_sig,pose_unks,unk = None,0x0,(0,0),b''
+        pose,pose_sig,unk = None,0x0,b''
         while file.tell() - start < length:
-            chunk = read_uints(file,1)
-            if   chunk == 0xCAC0E100: pose,pose_sig,pose_unks = [read_x_tmatrix(file) for _ in range(read_uints(file,1)//0x30)],chunk,(0,0)
-            elif chunk == 0xCAC0EB00: pose,pose_sig,pose_unks = [read_x_tmatrix(file) for _ in range(read_uints(file,1)//0x30)],chunk,read_uints(file,2)
-            elif chunk == 0xCAC0EA00: unk = file.read(read_uints(file,1))
+            chunk,length = read_uints(file,2)
+            if   chunk == 0xCAC0E100: pose,pose_sig = [read_x_tmatrix(file) for _ in range(length//0x30)],chunk
+            elif chunk == 0xCAC0EB00: pose,pose_sig = NewPose.parse(file),chunk
+            elif chunk == 0xCAC0EA00: unk = file.read(length)
             elif chunk == 0x0: break
-            else: raise Exception(f'Found unknown loc chunk ({hex(chunk)}) @ {hex(file.tell())} in {file.name}. Started @ {hex}')
+            else: raise Exception(f'Found unknown loc chunk ({hex(chunk)}) @ {hex(file.tell()-8)} in {file.name}. Started @ {hex(start - 8)}')
         return PlacedChar(char_id = char_id,
                           char = char,
                           pos = pos,
@@ -682,7 +842,6 @@ class PlacedChar:
                           state = state,
                           pose = pose,
                           pose_sig = pose_sig,
-                          pose_unks = pose_unks,
                           unk = unk)
     def __repr__(self) -> str:
         return f'PlacedChar({f'char={self.char.__repr__()}' if self.char else f'char_id={hex(self.char_id)}'}, pos={self.pos}, rot={self.rot}, state={hex(self.state)}, has_pose={bool(self.pose)})'
@@ -785,7 +944,7 @@ class CharDB:
         self.placed_chars.append(c_pchar)
         return c_pchar
     def __repr__(self) -> str:
-        return f'CharDB(version={hex(self.version)}, locale_id={hex(self.locale_id)}, chars_n={hex(len(self.lookup_table))}, placed_chars_n={hex(len(self.placed_chars))})'
+        return f'CharDB(name={self.name}, version={hex(self.version)}, locale_id={hex(self.locale_id)}, chars_n={hex(len(self.lookup_table))}, placed_chars_n={hex(len(self.placed_chars))})'
     def write(self, as_local: bool, owner_idb: ItemDB, write_parent_class: bool = True) -> bytes:
         uidb = self.rfp.itemdb
         lt_d,b_d = b'',b'' #lookuptable, body data

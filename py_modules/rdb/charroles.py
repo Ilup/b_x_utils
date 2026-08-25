@@ -15,6 +15,7 @@ from dataclasses import dataclass,field,replace
 from typing import Any
 
 import os
+import bpy
 
 @dataclass
 class Relation:
@@ -226,16 +227,27 @@ class RoleInstance: #Used in characters
         d = write_uint(role.id) + write_float(self.unk_float)
         for m_t,m_n,val in self.filled_variables: d += write_uint(val)
         return d + write_uint(self.unk_int)
+    def to_inst(self, inst) -> None:
+        if self.role:
+            inst.role_id,inst.role_name = self.role.id,self.role.name
+        inst.unk_float = self.unk_float
+        inst.filled_variables.clear()
+        for type,name,value in self.filled_variables:
+            i_v = inst.filled_variables.add()
+            i_v.var_type,i_v.name,i_v.value = type,name,value
 
 @dataclass
 class OldRoleInstance:
-    role_id: OldRole | None = None
+    role_id: int = 0
     unk: int = 0x0
     @classmethod
     def parse(cls, file: BufferedReader) -> OldRoleInstance:
         id,unk = read_uints(file,2)
         return OldRoleInstance(role_id = id,
                                unk = unk)
+    def to_inst(self, inst) -> None:
+        inst.role_id = self.role_id
+        inst.unk = self.unk
 
 @dataclass #For updating to the new v3 db; Hellmode updates.
 class OldRole:
@@ -403,6 +415,13 @@ class RoleDB:
         self.roles[next_id] = new_role
         self.r_roles[new_role] = next_id
         return new_role
+    def get_names(self) -> list[str]:
+        names = []
+        file = self.file
+        for _,__,offset,size in self.lookup_table.values():
+            file.seek(self.data_start + offset + 8)
+            names.append(read_name(file))
+        return names
     def write(self) -> bytes:
         lt_d = b'' #lookup table data
         b_d  = b'' #body data

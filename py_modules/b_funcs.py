@@ -93,25 +93,31 @@ def copy_objects(objects: list[bpy.types.Object], col: bpy.types.Collection = No
         if copy is not copy_root: copy.root_node = copy_root
     return copies
 
+def get_root(obj: bpy.types.Object) -> bpy.types.Object:
+    while obj.parent:
+        obj = obj.parent
+    return obj
+
 def get_world_matrix(obj: bpy.types.Object) -> Matrix:
     '''
     Since the rfc importer will need to merge objects before world matrices are evaluated, find them the hard way.
     '''
     matrix = Matrix.Identity(4)
     while obj:
-        matrix = obj.matrix_local @ matrix
+        matrix = obj.matrix_basis @ matrix
         obj = obj.parent
     return matrix
 
 def merge_hierarchy(hierarchy: list[bpy.types.Object], col: bpy.types.Collection | None, purge_original: bool = True) -> bpy.types.Object:
-    dest_obj = copy_object(hierarchy[0])
+    root = get_root(hierarchy[0])
+    dest_obj = copy_object(root)
     if col: col.objects.link(dest_obj)
-    target_inv_matrix = get_world_matrix(hierarchy[0]).inverted()
+    target_inv_matrix = root.matrix_basis.inverted()
     mat_dict = {mat:i for i,mat in enumerate(dest_obj.data.materials)}
     bm_target = bmesh.new()
     bm_target.from_mesh(dest_obj.data)
     for obj in hierarchy:
-        if not obj or obj is dest_obj or obj.type != 'MESH': continueold_to_new_mat_idx_dict = {}
+        if not obj or obj is root or obj.type != 'MESH': continue
         old_to_new_mat_idx_dict = {}
         for i, mat in enumerate(obj.data.materials):
             if mat not in mat_dict:
@@ -121,6 +127,7 @@ def merge_hierarchy(hierarchy: list[bpy.types.Object], col: bpy.types.Collection
 
         bm = bmesh.new()
         bm.from_mesh(obj.data)
+        #Local object space -> world space -> dest space
         bm.transform(target_inv_matrix @ get_world_matrix(obj))
 
         #There isnt a convenient bmesh merging function. Do it the manual way...

@@ -5,8 +5,10 @@ sys.path.append(r"C:\Users\jango\Desktop\b_x_utils\py_modules")
 
 from .parsing_funcs import *
 from .zig_modules import x_mesh_zig
-from .rdb.items import ItemDB
-from .rdb.chars import CharDB
+from .rdb.items import ItemDB,Item
+from .rdb.chars import CharDB,Character
+
+from ..panels import convenience_funcs as cf
 
 from typing import TYPE_CHECKING
 
@@ -214,16 +216,18 @@ def build_node(rfp: RFP, file: BufferedReader, rfc_sig: int, col: bpy.types.Coll
     else: 
         data = None
     obj = bpy.data.objects.new(name,data)
-    obj.matrix_local = tmatrix
     if parent: obj.parent = nodes[parent-1]
+    obj.matrix_basis = tmatrix
     if col: col.objects.link(obj)
     return obj
     
 def parse_nodes(rfp: RFP, file: BufferedReader, rfc_sig: int, scene: bpy.types.Scene, is_prop: bool = False, *args, **kwargs) -> tuple[str,list[bpy.types.Object]]:
     col = bf.verify_colname_in_scene(scene, 'Nodes') if scene else None
     nodes = []
-    for _ in range(read_uints(file,1)):
-        nodes.append(build_node(rfp, file, rfc_sig, col, nodes, is_prop))
+    for i in range(read_uints(file,1)):
+        obj = build_node(rfp, file, rfc_sig, col, nodes, is_prop)
+        obj.node_index = i
+        nodes.append(obj)
     root = nodes[0]
     for node in nodes:
         if node is root: continue
@@ -292,14 +296,14 @@ def parse_props(rfp: RFP, file: BufferedReader, scene: bpy.types.Scene, length: 
     return 'Props', None
 
 def parse_itemdb(rfp: RFP, itemdb: ItemDB, itemdb_dict: dict[int,ItemDB], length: int, scene: bpy.types.Scene, import_settings: dict[str,bool], *args, **kwargs) -> tuple[str,ItemDB]:
-    col = bf.verify_colname_in_scene(scene, 'Items')
     itemdb.parse_local_db(length, itemdb_dict)
     if not import_settings['import_items']:
         return 'ItemDB',itemdb
+    col = bf.verify_colname_in_scene(scene, 'Items')
     #Since this is using x_utils, it has all of this already parsed in memory; in the ItemDB.
     items_n = len(itemdb.placed_items)
     info_interval = items_n//5
-    print(f'Building {hex(len(itemdb.placed_items))} placed items...')
+    print(f'Building {hex(items_n)} placed items...')
     for i,pitem in enumerate(itemdb.placed_items):
         if i%info_interval == 0: print(f'\tBuilding item {hex(i + 1)} of {hex(items_n)}')
         objs = pitem.item.to_objs(rfp, col)
@@ -309,10 +313,37 @@ def parse_itemdb(rfp: RFP, itemdb: ItemDB, itemdb_dict: dict[int,ItemDB], length
             sn.pose(objs_by_name)
     return 'ItemDB',itemdb
 
-def parse_chardb(rfp: RFP, chardb: CharDB, version: int, chardb_dict: dict[int,CharDB], itemdb_dict: dict[int,ItemDB], length: int, *args, **kwargs) -> tuple[str,CharDB]:
+def parse_chardb(rfp: RFP, chardb: CharDB, version: int, chardb_dict: dict[int,CharDB], itemdb_dict: dict[int,ItemDB], length: int, scene: bpy.types.Scene, import_settings: dict[str,bool], *args, **kwargs) -> tuple[str,CharDB]:
+    # if not import_settings['import_chars']:
+    #     return 'CharDB',chardb
     chardb.parse_local_db(length = length, version = version, chardb_dict = chardb_dict, itemdb_dict = itemdb_dict)
-    # for char in chardb.placed_chars:
-    #     print(char)
+    if not import_settings['import_chars']:
+        return 'CharDB',chardb
+    col = bf.verify_colname_in_scene(scene,'Chars')
+    chars_n = len(chardb.placed_chars)
+    info_interval = chars_n // 5
+    print(f'Building {hex(chars_n)} placed characters...')
+    for i,pchar in enumerate(chardb.placed_chars):
+        if i%info_interval == 0: print(f'\tBuilding char {hex(i + 1)} of {hex(chars_n)}')
+        char: Character = pchar.char
+        if not char: continue
+        objs = char.to_objs(rfp, col)
+        obj = objs[0]
+        obj.location += pchar.pos.xzy
+        obj.rotation_euler.z = pchar.rot
+        obj.x_char.state = pchar.state
+        if pchar.pose:
+            if pchar.pose_sig == 0xCAC0E100:
+                for bone,tmatrix in zip(objs,pchar.pose[:len(objs)]): #Lop off anything extra
+                    bone.matrix_world = tmatrix
+            elif pchar.pose_sig == 0xCAC0EB00:
+                bone_dict = {}
+                for i,obj in enumerate(objs):
+                    if obj.name[:2].isnumeric(): bone_dict[int(obj.name[:2])] = obj
+                    else:                        bone_dict[i + 2] = obj
+                pchar.pose.pose(bone_dict)
+        #It appears the nodes can be out of sequence. Search for the root object.
+        cf.get_root_in_hierarchy(obj).name = char.name
     return 'CharDB',chardb
 
 rfc_chunk_dict = {
@@ -334,11 +365,13 @@ def parse_rfc(rfp: RFP, name: str, file: BufferedReader, size: int, scene: bpy.t
         start = file.tell()
         signature = read_uints(file,1)
     else: start = file.tell() - 4
-    itemdb = ItemDB(file = file, name = name, signature = 0x80000000) #local/level db
-    itemdb_dict[0x80000000] = itemdb
-    localedb = rfp.locales
-    chardb = CharDB(file = file, locale_id = localedb.get_locale_by_name(name, return_id = True), db_dict = itemdb_dict, rfp = rfp, name = name)
-    chardb_dict[0x80000000] = chardb
+    if not is_prop:
+        itemdb = ItemDB(file = file, name = name, signature = 0x80000000) #local/level db
+        itemdb_dict[0x80000000] = itemdb
+        localedb = rfp.locales
+        chardb = CharDB(file = file, locale_id = localedb.get_locale_by_name(name, return_id = True), db_dict = itemdb_dict, rfp = rfp, name = name)
+        chardb_dict[0x80000000] = chardb
+    else: itemdb,chardb = None,None
     chunks = {}
     while file.tell() - start < size:
         chunk_signature,chunk_length = read_uints(file,2)

@@ -45,7 +45,7 @@ class RPK:
         file.seek(self.data_start + offset)
         signature = read_uints(file,1)
         if   signature == 0x3D23AFCF: return parse_rfc(rfp = rfp, name = name, file = file, size = size, scene = scene, read_signature = False, signature = signature, return_nodes = True, is_prop = is_prop)
-        elif signature == 0xDBCB0D00: return RaceDB.parse(file, version = signature, data_size = size)
+        elif signature == 0xDBCB0D00: return RaceDB.parse(file = file, version = signature, data_size = size)
         elif signature == 0xDBAE0D01: return LocaleDB.parse(file, signature = signature)
         elif signature & 0xFFFFFF00 == 0xDBCB0D00: return RoleDB.parse(file, signature)
         elif signature == 0xAFCE01CE: return PowerTree.parse(file, length = size - 4)

@@ -1,6 +1,11 @@
 import bpy
 from typing import Any
 
+def get_root_in_hierarchy(obj: bpy.types.Object) -> bpy.types.Object:
+    while obj.parent:
+        obj = obj.parent
+    return obj
+
 def get_root_node(obj: bpy.types.Object) -> bpy.types.Object:
     obj = obj.root_node if obj.root_node else obj
     while obj.x_item.instance_of:

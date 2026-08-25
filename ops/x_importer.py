@@ -37,7 +37,7 @@ class ImportXFile(bpy.types.Operator):
         scene = context.scene
         print(f'Cleaning collections...')
         for col in scene.collection.children: bf.purge_col(col,True)
-        import_settings = {'import_sectors':p.import_sectors,'import_props':p.import_props,'import_items':p.import_items}
+        import_settings = {'import_sectors':p.import_sectors,'import_props':p.import_props,'import_items':p.import_items,'import_chars':p.import_chars}
         itemdb_dict = {0x0: rfp.itemdb}
         parse_rfc(rfp = rfp, name = os.path.basename(self.filepath), file = file, size = os.path.getsize(self.filepath), scene = scene, import_settings = import_settings, itemdb_dict = itemdb_dict)
         print(f'Took {time.perf_counter() - start_time} seconds to import...')

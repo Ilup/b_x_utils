@@ -1,9 +1,12 @@
-from . import items,nodes
+from . import nodes,items,chars
 
 def register():
-    items.register()
     nodes.register()
+    items.register()
+    chars.register()
+    
 
 def unregister():
+    nodes.unregister()
     items.unregister()
-    nodes.register()
+    chars.unregister()

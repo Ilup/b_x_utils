@@ -8,6 +8,15 @@ from typing import Any
 
 from dataclasses import dataclass,field,replace
 
+import bpy
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from rfp import RFP
+else:
+    class RFP:
+        pass
+
 g_flags = {
     'rgf_usesex':     0x1,
     'rgf_usemorph':   0x2,
@@ -26,14 +35,14 @@ t_flags = {
     'rtf_korecover': 0x8,
     'rtf_mechanic':  0x10,
     'rtf_resilient': 0x20,
-    'rtf_etheral':   0x100,
+    'rtf_ethereal':   0x100,
     'rtf_floating':  0x200
 }
 b_flags = {
-    'rtf_aggresive':   0x1,
-    'rtf_savage':      0x2, 
-    'rtf_smashattack': 0x4,
-    'rtf_grabattack':  0x8
+    'rbf_aggressive':   0x1,
+    'rbf_savage':      0x2, 
+    'rbf_smashattack': 0x4,
+    'rbf_grabattack':  0x8
 }
 w_flags = {
     'rwf_none':  0x0,
@@ -71,6 +80,7 @@ class Race:
     parent: Race | None = None
 
     model_name:  str = 'Human'
+    model: list[bpy.types.Object] = field(default_factory = list)
     model_scale: tuple[float,float] = (0.0,0.0) #from 1?
 
     morph_name: str = 'Default'
@@ -96,7 +106,7 @@ class Race:
     atck_sync:  float = 0.0 # Step-attack synchronisation value
     atck_recvr: float = 1.0 # Recovery time from combat actions
     
-    locomotion: list[tuple[int,int,int,int,int]] = field(default_factory = lambda: [(0.0,0.0,0.0,0.0,0.0) for _ in range(4)])
+    locomotion: str = '' #list[tuple[int,int,int,int,int]] = field(default_factory = lambda: [(0.0,0.0,0.0,0.0,0.0) for _ in range(4)])
 
     base_health: float = 1.0
 
@@ -153,8 +163,8 @@ class Race:
     grunt_freq: int = 4
 
     body_parts: int = 0 #??
-    body_vals:  list[tuple[int,int,int,int]] = field(default_factory = lambda: [(0,0,0,0) for _ in range(20)]) #20 entries long.
-    body_covr:  list[tuple[int,int,int,int]] = field(default_factory = lambda: [(0,0,0,0) for _ in range(20)])
+    body_vals:  str = '' #list[tuple[int,int,int,int]] = field(default_factory = lambda: [(0,0,0,0) for _ in range(20)]) #20 entries long.
+    body_covr:  str = '' #list[tuple[int,int,int,int]] = field(default_factory = lambda: [(0,0,0,0) for _ in range(20)])
 
     weak_points: int = 0 #Unused
 
@@ -175,13 +185,13 @@ class Race:
     rtf_korecover: bool = False
     rtf_mechanic:  bool = False #Paralyzed when shocked
     rtf_resilient: bool = False # Resistant to stuns
-    rtf_etheral:   bool = False
+    rtf_ethereal:   bool = False
     rtf_floating:  bool = False
     #RBF - Behabvior flags
-    rtf_aggresive:   bool = False #Does not parry and fights aggressively
-    rtf_savage:      bool = False # disregards defence
-    rtf_smashattack: bool = False
-    rtf_grabattack:  bool = False #Replaces thrusts
+    rbf_aggressive:   bool = False #Does not parry and fights aggressively
+    rbf_savage:      bool = False # disregards defence
+    rbf_smashattack: bool = False
+    rbf_grabattack:  bool = False #Replaces thrusts
     #RWF - Weapon type flags
     rwf_none:  bool = False #Cannot use weapons
     rwf_held:  bool = False #Normal weapons
@@ -189,13 +199,16 @@ class Race:
     rwf_large: bool = False #Large weapons (Golems)
     rwf_giant: bool = False #Giant weapons (Ogres)
     @classmethod
-    def parse(cls, file: BufferedReader, id: int, racedb: RaceDB) -> Race:
+    def parse(cls, rfp: RFP, file: BufferedReader, id: int, racedb: RaceDB) -> Race:
         start = file.tell()
         r = Race(id = id)
         r.name = read_name(file)
         parent_id,build_flag,trait_flag,behave_flag = read_uints(file,4)
-        r.parent = racedb.get_race(parent_id) if parent_id else None
+        r.parent = racedb.get_race(rfp, parent_id) if parent_id else None
         r.model_name,r.model_scale = read_name(file),read_floats(file,2)
+        return_point = file.tell()
+        r.model = rfp.get_race_model(r.model_name+'base.rfc',None)
+        file.seek(return_point)
         r.morph_name,r.anim_set    = read_name(file),read_name(file)
         # 0x58 to this point.
         weapon_flag = read_uints(file,1)
@@ -205,7 +218,7 @@ class Race:
         r.atck_range,r.atck_swing,r.atck_sync,r.atck_recvr = read_floats(file,4)
         # 0x88 to this point.
         # r.locomotion = [Locomotion.parse(file) for _ in range(4)]
-        r.locomotion = [read_floats(file,5) for _ in range(4)]
+        r.locomotion = file.read(4*5*4).hex()#[read_floats(file,5) for _ in range(4)]
         # 0xD8 to this point.
         r.base_health = read_floats(file,1)
         r.blood_color = read_ubytes(file,4)
@@ -225,8 +238,8 @@ class Race:
         r.dead_gain,r.dead_pitch     = read_floats(file,2)
         r.grunt_freq = read_uints(file,1)
         r.body_parts = read_uints(file,1)
-        r.body_vals = [read_ubytes(file,4) for _ in range(20)]
-        r.body_covr = [read_ubytes(file,4) for _ in range(20)]
+        r.body_vals = file.read(4*20).hex() #[read_ubytes(file,4) for _ in range(20)]
+        r.body_covr = file.read(4*20).hex() #[read_ubytes(file,4) for _ in range(20)]
         r.weak_points = read_uints(file,1)
         #DONE READING
         for attr_name,val in {name:bool(build_flag & bitflag)  for name,bitflag in g_flags.items()}.items(): setattr(r,attr_name,val)
@@ -237,6 +250,44 @@ class Race:
         return r
     # def __repr__(self) -> str:
     #     return f'Race(id={hex(self.id)}, name={self.name}, model_name={self.model_name})'
+    def to_obj(self, obj: bpy.types.Object) -> None:
+        # print(self)
+        r = obj.x_char.race
+        r.name = self.name
+        r.parent_id = self.parent.id if self.parent else 0
+        r.model_name,r.model_scale = self.model_name,self.model_scale
+        r.morph_name,r.anim_set = self.morph_name,self.anim_set
+        r.base_speed,r.step_speed = self.base_speed,self.step_speed
+        r.char_size,r.char_scale,r.scale_ratio,r.char_mass = self.char_size,self.char_scale,self.scale_ratio,self.char_mass
+        r.balance,r.rigidity,r.steadiness,r.dampen = self.balance,self.rigidity,self.steadiness,self.dampen
+        r.atck_range,r.atck_swing,r.atck_sync,r.atck_recvr = self.atck_range,self.atck_swing,self.atck_sync,self.atck_recvr
+        r.locomotion = self.locomotion
+        r.base_health = self.base_health
+        r.blood_color = self.blood_color
+        r.mind_type,r.mind_part = self.mind_type,self.mind_part
+        r.mind_pos,r.mind_scale = self.mind_pos,self.mind_scale
+        r.mind_ang = self.mind_ang
+        r.vision,r.mind_sense,r.hearing = self.vision,self.mind_sense,self.hearing
+        r.resist_impact,r.resist_slash,r.resist_crush,r.resist_pierce = self.resist_impact,self.resist_slash,self.resist_crush,self.resist_pierce
+        r.resist_shock,r.resist_fire,r.resist_res0,r.resist_res1 = self.resist_shock,self.resist_fire,self.resist_res0,self.resist_res1
+        r.reserved = self.reserved
+        r.foley_sound,r.step_sound,r.impact_sound,r.wound_sound,r.voice_set,r.undead_voice = self.foley_sound,self.step_sound,self.impact_sound,self.wound_sound,self.voice_set,self.undead_voice
+        r.foley_gain,r.foley_pitch   = self.foley_gain,self.foley_pitch
+        r.step_gain,r.step_pitch     = self.step_gain,self.step_pitch
+        r.impact_gain,r.impact_pitch = self.impact_gain,self.impact_pitch
+        r.wound_gain,r.wound_pitch   = self.wound_gain,self.wound_pitch
+        r.voice_gain,r.voice_pitch   = self.voice_gain,self.voice_pitch
+        r.dead_gain,r.dead_pitch     = self.dead_gain,self.dead_pitch
+
+        r.usesex,r.usemorph,r.useapparel,r.underwear = self.rgf_usesex,self.rgf_usemorph,self.rgf_useapparel,self.rgf_underwear
+        r.usehair,r.usebeard,r.procskin,r.decomp,r.edgefade = self.rgf_usehair,self.rgf_usebeard,self.rgf_procskin,self.rgf_procskin,self.rgf_edgefade
+
+        r.bleeding,r.living,r.learns,r.korecover, = self.rtf_bleeding,self.rtf_living,self.rtf_learns,self.rtf_korecover
+        r.mechanic,r.resilient,r.ethereal,r.floating = self.rtf_mechanic,self.rtf_resilient,self.rtf_ethereal,self.rtf_floating
+
+        r.aggressive,r.savage,r.smashattack,r.grabattack = self.rbf_aggressive,self.rbf_savage,self.rbf_smashattack,self.rbf_grabattack
+
+        r.none,r.held,r.claws,r.large,r.giant = self.rwf_none,self.rwf_held,self.rwf_claws,self.rwf_large,self.rwf_giant
     def write(self) -> bytes:
         d  = write_name(self.name)
         d += write_uints((self.parent.id if self.parent else 0, write_flags(g_flags,self), write_flags(t_flags,self), write_flags(b_flags,self)))
@@ -293,7 +344,7 @@ class RaceDB:
                       lookup_table = lookup_table,
                       data_start = data_start,
                       races = {})
-    def get_race(self, id: int, lite_mode: bool = False) -> Race | bytes | None:
+    def get_race(self, rfp: RFP, id: int, lite_mode: bool = False) -> Race | bytes | None:
         file = self.file
         if id not in self.lookup_table and id not in self.races: 
             print(f'Failed to get race ID {hex(id)}, returning None')
@@ -306,7 +357,7 @@ class RaceDB:
             self.races[id] = race
             _,__,offset,size = self.lookup_table[id]
             file.seek(self.data_start + offset)
-            race.__dict__.update(Race.parse(file, id, self).__dict__)
+            race.__dict__.update(Race.parse(rfp, file, id, self).__dict__)
             self.races[id] = race
             file.seek(start)
             return race

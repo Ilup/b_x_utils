@@ -12,6 +12,7 @@ from bpy.props import (
     FloatVectorProperty,
 )
 
+
 class XUtils_PT_Panel(bpy.types.Panel):
     bl_label = "Exanima Utils"
     bl_idname = "XUtils_PT_Panel"
@@ -20,7 +21,10 @@ class XUtils_PT_Panel(bpy.types.Panel):
     bl_category = 'Exanima Utils'
     def draw(self, context):
         addon_name = __package__.split('.')[0]
-        p = bpy.context.preferences.addons[addon_name].preferences
+        if not (addon := context.preferences.addons.get(addon_name)):
+            self.layout.label(text="Addon preferences unavailable")
+            return
+        p = addon.preferences
         layout = self.layout
         layout.row().prop(p, 'import_path')
         row = layout.row()
@@ -28,10 +32,23 @@ class XUtils_PT_Panel(bpy.types.Panel):
         row.prop(p,'import_props')
         row = layout.row()
         row.prop(p,'import_items')
+        row.prop(p,'import_chars')
         op = layout.row().operator('exanima.import_x_file')
         op.filepath = p.import_path
 
-classes = [XUtils_PT_Panel]
+class XUtils_DBEntry_Editor_PT_Panel(bpy.types.Panel):
+    bl_label = "Exanima Utils"
+    bl_idname = "XUtils_DBEntry_Editor_PT_Panel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Exanima Utils'
+    bl_parent_id = "XUtils_PT_Panel"
+    def draw(self, context):
+        layout = self.layout
+        layout.row().operator('exanima.edit_x_item')
+        layout.row().operator('exanima.edit_x_char')
+
+classes = [XUtils_PT_Panel,XUtils_DBEntry_Editor_PT_Panel]
 
 def register():
     for cls in classes: bpy.utils.register_class(cls)

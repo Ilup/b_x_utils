@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import sys
-sys.path.append(r"C:\Users\jango\Desktop\b_x_utils\py_modules")
-
 from .rfc import parse_rfc,SortedTileset
 
 from .parsing_funcs import *
 from .rpk import RPK
 
 from .rdb.items import ItemDB,Item
+from .rdb.chars import Character
 from .rdb.races import RaceDB
 from .rdb.charroles import RoleDB
 from .rdb.locales import LocaleDB
@@ -16,12 +14,18 @@ from .rdb.locales import LocaleDB
 from .pwr import PowerTree
 
 from dataclasses import dataclass,field
+from typing import ClassVar
 
 from . import b_funcs as bf
 
 import bpy
 
 import os
+
+def check_if_should_merge_obj(obj: bpy.types.Object) -> bool:
+    if '+F' in obj.name: return False
+    #Ignore only "black" objects
+    elif [mat for mat in obj.data.materials if mat.name.lower() != 'black' and mat.name.lower() != '_null']: return True
 
 @dataclass
 class RFP:
@@ -47,12 +51,16 @@ class RFP:
     pwrs:          list[PowerTree] = field(default_factory = list)
     locales:       LocaleDB = field(default_factory = LocaleDB)
 
-    built_props: dict[str,list[bpy.types.Object]] = field(default_factory = dict)
+    built_props: dict[str,list[bpy.types.Object]]        = field(default_factory = dict)
     built_world_models: dict[str,list[bpy.types.Object]] = field(default_factory = dict)
-    built_char_models: dict[str,list[bpy.types.Object]] = field(default_factory = dict)
-    built_race_models: dict[str,list[bpy.types.Object]] = field(default_factory = dict)
+    built_char_models: dict[str,list[bpy.types.Object]]  = field(default_factory = dict)
+    built_race_models: dict[str,list[bpy.types.Object]]  = field(default_factory = dict)
 
-    built_items: dict[Item,bpy.types.Object] = field(default_factory = dict)
+    built_items: dict[Item,bpy.types.Object]      = field(default_factory = dict)
+    built_chars: dict[Character,bpy.types.Object] = field(default_factory = dict)
+
+    role_names: ClassVar[list[str]] = []
+    spell_names: ClassVar[list[str]] = []
     @classmethod
     def parse(cls, file_directory: str) -> RFP:
         rfp_path = os.path.join(file_directory,'Exanima.rfp')
@@ -89,6 +97,14 @@ class RFP:
                                    5: None,
                                    6: resource.parse_entry('pwr_displace.pwr') if 'pwr_displace.pwr' in resource.lookup_table else None},
                    locales      = resource.parse_entry('locales.rdb'))
+    @classmethod
+    def get_role_names(cls, exanima_dir: str) -> list[str]:
+        if not RFP.role_names: #Only do this stuff once.
+            rfp_path = os.path.join(exanima_dir,'Exanima.rfp')
+            if not os.path.exists(rfp_path): return [('N/A','N/A','')]
+            rfp = RFP.parse(exanima_dir)
+            RFP.role_names = [(name,name,'') for name in rfp.roledb.get_names()]
+        return RFP.role_names
     def get_set(self, set_name: str) -> SortedTileset:
         import_name = set_name
         set_name = set_name[:-4].lower() #Cut off .rfc and make it lowercase.
@@ -99,7 +115,8 @@ class RFP:
         raw_objs = self.resource.parse_entry(import_name, self, None, True)
         roots = [obj for obj in raw_objs if not obj.parent]
         print(f'\tMerging {len(roots)} hierarchies...')
-        mobjs = [bf.merge_hierarchy(hierarchy = [root] + [child for child in root.children_recursive if '+F' not in child.name], col = set_col) for root in roots]
+        mobjs = [bf.merge_hierarchy(hierarchy = [root] + [child for child in root.children_recursive if check_if_should_merge_obj(child)], col = set_col) for root in roots]
+        for obj in mobjs: obj.tileset = set_name
         return SortedTileset.sort(name = set_name, objs = mobjs)
     def get_prop(self, prop_name: str, col: bpy.types.Collection | None) -> list[bpy.types.Object] | None:
         if prop_name in self.built_props:
@@ -112,7 +129,9 @@ class RFP:
                     for obj in objs: col.objects.link(obj)
                 self.built_props[prop_name] = objs
                 return objs
-        else: return None
+        else: 
+            print(f'Failed to get prop ({prop_name})')
+            return None
     def get_world_model(self, model_name: str, col: bpy.types.Collection) -> list[bpy.types.Object] | None:
         model_name = model_name.lower()
         if model_name in self.built_world_models:
@@ -123,6 +142,21 @@ class RFP:
                 for obj in objs: col.objects.link(obj)
             self.built_world_models[model_name] = objs
             return objs
+        else:
+            objs = [bf.create_empty(name = model_name, col = col)]
+            self.built_world_models[model_name] = objs
+            return objs
+        #     raise Exception(f'Failed to get world model ({model_name}) from rpk {self.objects.file}')
+    def get_race_model(self, model_name: str, col: bpy.types.Collection) -> list[bpy.types.Object] | None:
+        model_name = model_name.lower()
+        if model_name in self.built_race_models:
+            return bf.copy_objects(self.built_race_models[model_name], col)
+        elif model_name in self.resource.lookup_table:
+            objs = self.resource.parse_entry(model_name, self, None, True)
+            for obj in objs: obj.is_race_base = True #Helper
+            if col:
+                for obj in objs: col.objects.link(obj)
+            self.built_race_models[model_name] = objs
+            return objs
         else: 
-            raise Exception(f'Failed to get world model {model_name}')
-            return None
+            raise Exception(f'Failed to get race model {model_name}')

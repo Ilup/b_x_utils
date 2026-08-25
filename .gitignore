@@ -1,5 +1,7 @@
 __pycache__/
 .zig-cache/
 zig-out/
-*.so
-*.pyd
+# *.so
+# *.pyd
+.vscode
+.rfc

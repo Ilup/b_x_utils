@@ -85,6 +85,7 @@ class PWeapon(bpy.types.PropertyGroup):
     wear:           IntProperty()
     dirt:           IntProperty()
     variance:       IntProperty()
+    collapsed_materials: BoolProperty(default = True)
     materials:      CollectionProperty(type = WeaponMat)
     weight:         IntProperty()
     balance:        IntProperty()
@@ -106,6 +107,7 @@ class PWeapon(bpy.types.PropertyGroup):
     sounds:         IntProperty()
     rank_points:    IntProperty()
     statunk7:       IntProperty()
+    collapsed_sockets: BoolProperty(default = True)
     sockets:        CollectionProperty(type = Socket)
     components:     IntVectorProperty(size = 16)
 
@@ -166,8 +168,10 @@ class Apparel(bpy.types.PropertyGroup):
     wear:          IntProperty()
     dirt:          IntProperty()
     variance:      IntProperty()
+    collapsed_materials: BoolProperty(default = True)
     materials:     CollectionProperty(type = ApparelMat)
     ability:       IntProperty()
+    collapsed_sockets: BoolProperty(default = True)
     sockets:       CollectionProperty(type = Socket)
     set_uid:       IntProperty()
 
@@ -301,7 +305,9 @@ classes = [ReferencedObject,
 def register():
     for cls in classes: bpy.utils.register_class(cls)
     bpy.types.Object.x_item = PointerProperty(type = Item)
+    bpy.types.Scene.suppress_item_updates = BoolProperty()
 
 def unregister():
-    for cls in classes: bpy.utils.unregister_class(cls)
     del bpy.types.Object.x_item
+    del bpy.types.Scene.suppress_item_updates
+    for cls in classes: bpy.utils.unregister_class(cls)

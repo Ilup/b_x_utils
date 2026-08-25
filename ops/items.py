@@ -120,6 +120,8 @@ def draw_sweapon(layout, x_item) -> None:
         for socket in w.sockets:
             cf.display_props_on_new_row(box,socket,['type','usage'])
 
+
+
 def draw_pweapon(layout, x_item) -> None:
     w = x_item.pweapon
     header = layout.row(align=True)
@@ -129,25 +131,25 @@ def draw_pweapon(layout, x_item) -> None:
         cf.display_props_on_new_row(layout,w,['grip_type','sword_flags','haft_materials','weapon_flags'])
         cf.display_props_on_new_row(layout,w,['factory_seed','material_seed'])
         cf.display_props_on_new_row(layout,w,['quality','wear','dirt','variance'])
-        row = layout.row()
-        row.alignment = 'CENTER'
-        row.label(text = f'Materials')
         box = layout.box()
-        for mat in w.materials:
-            cf.display_props_on_new_row(box,mat,['material','luster','color','theme'])
-        layout.row().separator()
+        header = box.row(align=True)
+        icon_style = 'TRIA_DOWN' if not w.collapsed_materials else 'TRIA_RIGHT'
+        header.prop(w, "collapsed_materials", text="Materials", icon=icon_style, emboss=False)
+        if not w.collapsed_materials:
+            for mat in w.materials:
+                cf.display_props_on_new_row(box,mat,['material','luster','color','theme'])
         cf.display_props_on_new_row(layout,w,['weight','impact','balance','slash','crush','pierce','thrust'])
         cf.display_props_on_new_row(layout,w,['eff_near','eff_mid','eff_end'])
         cf.display_props_on_new_row(layout,w,['flip','f_eff_near','f_eff_far','flip_slash','flip_crush','flip_pierce'])
         cf.display_props_on_new_row(layout,w,['grade','sound','rank_points','statunk7'])
         layout.row().prop(w,'ability')
-        row = layout.row()
-        row.alignment = 'CENTER'
-        row.label(text = f'Sockets')
         box = layout.box()
-        for socket in w.sockets:
-            cf.display_props_on_new_row(box,socket,['type','usage'])
-        layout.row().separator()
+        header = box.row(align=True)
+        icon_style = 'TRIA_DOWN' if not w.collapsed_sockets else 'TRIA_RIGHT'
+        header.prop(w, "collapsed_sockets", text="Sockets", icon=icon_style, emboss=False)
+        if not w.collapsed_sockets:
+            for socket in w.sockets:
+                cf.display_props_on_new_row(box,socket,['type','usage'])
         layout.row().prop(w,'components')
 
 def draw_shield(layout, x_item) -> None:
@@ -182,19 +184,21 @@ def draw_apparel(layout, x_item) -> None:
         cf.display_props_on_new_row(layout,a,['app_type','app_class','trait','rank_points'])
         layout.row().prop(a,'material_seed')
         cf.display_props_on_new_row(layout,a,['quality','wear','dirt','variance'])
-        row = layout.row()
-        row.alignment = 'CENTER'
-        row.label(text = f'Materials')
         box = layout.box()
-        for mat in a.materials:
-            cf.display_props_on_new_row(box,mat,['layer','part','element','design','material','trait','color','theme'])
+        header = box.row(align=True)
+        icon_style = 'TRIA_DOWN' if not a.collapsed_materials else 'TRIA_RIGHT'
+        header.prop(a, "collapsed_materials", text="Materials", icon=icon_style, emboss=False)
+        if not a.collapsed_materials:
+            for mat in a.materials:
+                cf.display_props_on_new_row(box,mat,['layer','part','element','design','material','trait','color','theme'])
         layout.row().prop(a,'ability')
-        row = layout.row()
-        row.alignment = 'CENTER'
-        row.label(text = f'Sockets')
         box = layout.box()
-        for socket in a.sockets:
-            cf.display_props_on_new_row(box,socket,['type','usage'])
+        header = box.row(align=True)
+        icon_style = 'TRIA_DOWN' if not a.collapsed_sockets else 'TRIA_RIGHT'
+        header.prop(a, "collapsed_sockets", text="Sockets", icon=icon_style, emboss=False)
+        if not a.collapsed_sockets:
+            for socket in a.sockets:
+                cf.display_props_on_new_row(box,socket,['type','usage'])
         layout.row().prop(a,'set_uid')
 
 def draw_container(layout, x_item) -> None:
@@ -304,6 +308,24 @@ def draw_door(layout, x_item) -> None:
             cf.add_op_to_row(row = row, op_idname = 'exanima.locate_x_items',args = [('obj_name',d.key.name)], icon = 'VIEWZOOM',   text = '')
         cf.display_props_on_new_row(layout,d,['unk4','unk5','unk6'])
 
+def verify_is_item(obj: bpy.types.Object) -> bool:
+    x_item = obj.x_item
+    #this sucks, but whatever.
+    if   x_item.thing.bool:     return True
+    elif x_item.object.bool:    return True
+    elif x_item.sweapon.bool:   return True
+    elif x_item.pweapon.bool:   return True
+    elif x_item.shield.bool:    return True
+    elif x_item.torch.bool:     return True
+    elif x_item.apparel.bool:   return True
+    elif x_item.container.bool: return True
+    elif x_item.droptable.bool: return True
+    elif x_item.map.bool:       return True
+    elif x_item.zone.bool:      return True
+    elif x_item.operator.bool:  return True
+    elif x_item.door.bool:      return True
+    return False
+
 class OBJECT_OT_edit_x_item(bpy.types.Operator):
     bl_idname = 'exanima.edit_x_item'
     bl_label = "Edit Exanima Item"
@@ -314,6 +336,7 @@ class OBJECT_OT_edit_x_item(bpy.types.Operator):
         i_obj = bpy.data.objects.get(self.obj_name) if self.obj_name else context.active_object
         if not i_obj: return
         obj = cf.get_root_node(i_obj)
+
         x_item = obj.x_item
         row = layout.row()
         row.alignment = 'CENTER'
@@ -339,6 +362,12 @@ class OBJECT_OT_edit_x_item(bpy.types.Operator):
     def execute(self, context):
         return {'FINISHED'}
     def invoke(self, context, event):
+        i_obj = bpy.data.objects.get(self.obj_name) if self.obj_name else context.active_object
+        if not i_obj: return
+        obj = cf.get_root_node(i_obj)
+        if is_item := not verify_is_item(obj):
+            self.report({'WARNING'}, f"{obj.name} has no item classes enabled! It must not be an item...")
+            return {'CANCELLED'}
         return context.window_manager.invoke_popup(self, width=1200)
     
 classes = [OBJECT_OT_LocateXItems, OBJECT_OT_edit_x_item]
