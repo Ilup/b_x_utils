@@ -1,25 +1,125 @@
 const std = @import("std");
 
-// const c = @cImport({
-//     @cDefine("PY_SSIZE_T_CLEAN", {});
-//     @cInclude("Python.h");
-// });
-
-const py_wr = @import("py_wrapper_funcs.zig");
-const py = py_wr.py;
-
-const dr_m = @import("data_reader.zig");
-const Vector3df = dr_m.Vector3df;
-const Vector2df = dr_m.Vector2df;
-const DataReader = dr_m.DataReader;
-const MaterialRange = dr_m.MaterialRange;
-const Tripleu32 = dr_m.Tripleu32;
-const Tripleu16 = dr_m.Tripleu16;
-const PhysicsSphere = dr_m.PhysicsSphere;
-
 pub const Allocator: type = std.mem.Allocator;
 
 const print = std.debug.print;
+
+pub const Vector2df: type = extern struct {
+    x: f32 = 0.0,
+    y: f32 = 0.0,
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("Vector2df(x={d}, y={d})", .{ self.x, self.y });
+    }
+};
+pub const Vector3df: type = extern struct {
+    x: f32 = 0.0,
+    y: f32 = 0.0,
+    z: f32 = 0.0,
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("Vector3df(x={d}, y={d}, z={d})", .{ self.x, self.y, self.z });
+    }
+};
+pub const Vector4df: type = extern struct {
+    w: f32 = 0.0,
+    x: f32 = 0.0,
+    y: f32 = 0.0,
+    z: f32 = 0.0,
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("Vector4df(w={d}, x={d}, y={d}, z={d})", .{ self.w, self.x, self.y, self.z });
+    }
+};
+
+pub const Tripleu16: type = extern struct {
+    a: u16 = 0,
+    b: u16 = 0,
+    c: u16 = 0,
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("u16({}, {}, {})", .{ self.a, self.b, self.c });
+    }
+};
+pub const Tripleu32: type = extern struct {
+    a: u32 = 0,
+    b: u32 = 0,
+    c: u32 = 0,
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("u32({}, {}, {})", .{ self.a, self.b, self.c });
+    }
+};
+
+pub const MaterialRange: type = extern struct {
+    ignored: u32 = 0,
+    start: u32 = 0,
+    stop: u32 = 0,
+    name: [16]u8 = .{0} ** 16,
+    pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("MaterialRef(name={s}, start=0x{x}, stop=0x{x})", .{ std.mem.sliceTo(&self.name, 0), self.start, self.stop });
+    }
+};
+
+pub const DataReader: type = struct {
+    data: []u8,
+    pos: u32,
+    pub fn read_u8(self: *@This()) u8 {
+        const val: u8 = self.data[self.pos];
+        self.pos += 1;
+        return val;
+    }
+    pub fn read_u16(self: *@This()) u16 {
+        const val: u16 = std.mem.bytesToValue(u16, self.data[self.pos .. self.pos + 2]);
+        self.pos += 2;
+        return val;
+    }
+    pub fn read_u32(self: *@This()) u32 {
+        const val: u32 = std.mem.bytesToValue(u32, self.data[self.pos .. self.pos + 4]);
+        self.pos += 4;
+        return val;
+    }
+    pub fn read_u64(self: *@This()) u64 {
+        const val: u64 = std.mem.bytesToValue(u64, self.data[self.pos .. self.pos + 8]);
+        self.pos += 8;
+        return val;
+    }
+    pub fn read_f32(self: *@This()) f32 {
+        const val: f32 = std.mem.bytesToValue(f32, self.data[self.pos .. self.pos + 4]);
+        self.pos += 4;
+        return val;
+    }
+    pub fn read_2dfvec(self: *@This()) Vector2df {
+        const val: Vector2df = std.mem.bytesToValue(Vector2df, self.data[self.pos .. self.pos + 8]);
+        self.pos += 8;
+        return val;
+    }
+    pub fn read_3dfvec(self: *@This()) Vector3df {
+        const val: Vector3df = std.mem.bytesToValue(Vector3df, self.data[self.pos .. self.pos + 12]);
+        self.pos += 12;
+        return val;
+    }
+    pub fn read_4dfvec(self: *@This()) Vector4df {
+        const val: Vector4df = std.mem.bytesToValue(Vector4df, self.data[self.pos .. self.pos + 16]);
+        self.pos += 16;
+        return val;
+    }
+    pub fn read_tripleu16(self: *@This()) Tripleu16 {
+        const val: Tripleu16 = std.mem.bytesToValue(Tripleu16, self.data[self.pos .. self.pos + 6]);
+        self.pos += 6;
+        return val;
+    }
+    pub fn read_tripleu32(self: *@This()) Tripleu32 {
+        const val: Tripleu32 = std.mem.bytesToValue(Tripleu32, self.data[self.pos .. self.pos + 12]);
+        self.pos += 12;
+        return val;
+    }
+    pub fn read_material_range(self: *@This()) MaterialRange {
+        const val: MaterialRange = std.mem.bytesToValue(MaterialRange, self.data[self.pos .. self.pos + 0x1C]);
+        self.pos += 0x1C;
+        return val;
+    }
+    pub fn read_physicssphere(self: *@This()) PhysicsSphere {
+        const val: PhysicsSphere = std.mem.bytesToValue(PhysicsSphere, self.data[self.pos .. self.pos + 16]);
+        self.pos += 16;
+        return val;
+    }
+};
 
 pub const ParserError = error{ NotImplemented, UnknownSignature, UnknownVertexType, UnsupportedBitwidth, UnknownMapType, UnknownFaceChunk, UnknownMeshChunk, UnknownPhysicsChunk };
 
@@ -75,7 +175,7 @@ pub const MeshMapBundle = struct {
 
 pub fn read_map(allocator: Allocator, bitwidth: u8, cmpverts: u32, dr: *DataReader) ![]u32 {
     // For reading the vertexmaps to be used in the facemap.
-    // Store them as u32 so it will always have enough bits to store them without needing extra logipy.
+    // Store them as u32 so it will always have enough bits to store them without needing extra logic.
     const result: []u32 = try allocator.alloc(u32, cmpverts);
     switch (bitwidth) {
         16 => {
@@ -221,6 +321,8 @@ pub fn read_faces(dr: *DataReader, meshmaps: MeshMapBundle, allocator: Allocator
     return facechunk;
 }
 
+const PhysicsSphere: type = extern struct { pos: Vector3df = .{}, size: f32 = 0.0 };
+
 const MotionConstraint: type = extern struct { type: u32 = 0, v1: Vector3df = .{}, v2: Vector3df = .{}, radius: f32 = 0.0, stiffness: f32 = 0.0, damping: f32 = 0.0, v3: Vector3df = .{} };
 
 pub fn read_constraint(dr: *DataReader) MotionConstraint {
@@ -347,137 +449,16 @@ pub fn parse_mesh(allocator: Allocator, data: []u8, is_prop: bool) !MeshResult {
     return MeshResult{ .vertexbundle = vertexbundle, .meshmaps = meshmaps, .facechunk = facechunk, .physics = physics, .statics = statics, .softbody = softbody };
 }
 
-fn facechunk_to_py(vertexbundle: VertexBundle, meshmaps: MeshMapBundle, facechunk: FaceChunk, is_prop: bool) struct { face_vert_indices: ?*py.PyObject, loop_uvs: ?*py.PyObject, material_indices: ?*py.PyObject, faceints: ?*py.PyObject, faceflags: ?*py.PyObject } {
-    const uverts: []Vector2df = vertexbundle.uverts;
-    const edgemap: []u32 = meshmaps.edgemap;
-    const uvmap: []u32 = meshmaps.uvmap;
-    const faces: []Tripleu32 = facechunk.faces;
+pub fn main(init: std.process.Init) !void {
+    const cwd: std.Io.Dir = .cwd();
 
-    const face_vert_indices_list = py.PyList_New(@intCast(faces.len));
-    const loop_uvs_list = py.PyList_New(@intCast(faces.len * 3 * 2)); //for use in bpy.types.Mesh.loops.foreach_set ; Need to hold the uvs for each loop.
-    for (faces, 0..) |face, i| {
-        const tuple = py.PyTuple_New(3);
-        _ = py.PyTuple_SetItem(tuple, 0, py.PyLong_FromUnsignedLong(edgemap[face.c]));
-        _ = py.PyTuple_SetItem(tuple, 1, py.PyLong_FromUnsignedLong(edgemap[face.b]));
-        _ = py.PyTuple_SetItem(tuple, 2, py.PyLong_FromUnsignedLong(edgemap[face.a]));
-        _ = py.PyList_SetItem(face_vert_indices_list, @intCast(i), tuple);
-        const base_index = i * 6; //For the uv indexing
-        for ([3]u32{ face.c, face.b, face.a }, 0..) |index, j| {
-            const uv = uverts[uvmap[index]];
-            _ = py.PyList_SetItem(loop_uvs_list, @intCast(base_index + j * 2), py.PyFloat_FromDouble(uv.x));
-            _ = py.PyList_SetItem(loop_uvs_list, @intCast(base_index + j * 2 + 1), py.PyFloat_FromDouble(uv.y));
-        }
-    }
-    const material_indices_list = py.PyList_New(@intCast(facechunk.material_indices.len));
-    for (facechunk.material_indices, 0..) |mat_i, i| {
-        _ = py.PyList_SetItem(material_indices_list, @intCast(i), py.PyLong_FromUnsignedLong(mat_i));
-    }
-
-    const faceints_list = py.PyList_New(@intCast(facechunk.ints.len));
-    const faceflags_list = py.PyList_New(@intCast(facechunk.flags.len));
-    if (!is_prop) {
-        for (facechunk.ints, 0..) |fi, i| {
-            _ = py.PyList_SetItem(faceints_list, @intCast(i), py.PyLong_FromUnsignedLong(fi));
-        }
-
-        for (facechunk.flags, 0..) |ff, i| {
-            _ = py.PyList_SetItem(faceflags_list, @intCast(i), py.PyLong_FromUnsignedLong(ff));
-        }
-    }
-    return .{ .face_vert_indices = face_vert_indices_list, .loop_uvs = loop_uvs_list, .material_indices = material_indices_list, .faceints = faceints_list, .faceflags = faceflags_list };
-}
-
-fn meshresult_to_py(mr: MeshResult, is_prop: bool) ?*py.PyObject {
-    const result = py.PyTuple_New(7); //verts, vert_indices, loop_uvs, faceints, faceflags // DO THIS LATER physics, statics, softbody
-    const p_verts = py_wr.vector3df_slice_to_python(mr.vertexbundle.verts);
-    const material_names = py.PyTuple_New(@intCast(mr.meshmaps.materials.len));
-    for (mr.meshmaps.materials, 0..) |mat, i| {
-        _ = py.PyTuple_SetItem(material_names, @intCast(i), py.PyUnicode_Decode(&mat.name, @intCast(mat.name.len), "cp1252", null));
-    }
-    const p_fc = facechunk_to_py(mr.vertexbundle, mr.meshmaps, mr.facechunk, is_prop);
-    const items: []const ?*py.PyObject = &[_]?*py.PyObject{
-        p_verts,
-        p_fc.face_vert_indices,
-        p_fc.loop_uvs,
-        p_fc.material_indices,
-        material_names,
-        p_fc.faceints,
-        p_fc.faceflags,
-    };
-    py_wr.fill_py_tuple(result, items);
-    return result;
-}
-
-//Wrapper for the zig function. Converts py objects to zig objects and vice versa when needed.
-export fn parse_mesh_py(self: ?*py.PyObject, args: ?*py.PyObject) callconv(.c) ?*py.PyObject {
-    _ = self;
-
-    // const allocator = std.heap.smp_allocator;
-
-    // var dba: std.heap.DebugAllocator(.{}) = .init;
+    var dba: std.heap.DebugAllocator(.{}) = .init;
     // defer _ = dba.deinit();
-    // const allocator: mp.Allocator = dba.allocator();
+    const allocator: Allocator = dba.allocator();
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
-    defer arena.deinit();
+    const data: []u8 = try cwd.readFileAlloc(init.io, "D:\\Steam Library\\steamapps\\common\\Exanima\\Objlib\\step xaa02 03.rfc", init.gpa, .unlimited);
+    defer init.gpa.free(data);
 
-    const allocator = arena.allocator();
-
-    var ptr: []u8 = undefined;
-    var len: py.Py_ssize_t = undefined;
-    var is_prop: bool = undefined;
-
-    if (py.PyArg_ParseTuple(args, "y#p", &ptr, &len, &is_prop) == 0) { //Read the args, check the format, fill in the zig ids with the unpacked result.
-        return null; // Python exception already set
-    }
-
-    const data: []u8 = ptr[0..@intCast(len)];
-
-    const mesh_result: MeshResult = parse_mesh(allocator, data, is_prop) catch |err| {
-        std.debug.print("parse_mesh failed: {}\n", .{err});
-        return null;
-    };
-
-    return meshresult_to_py(mesh_result, is_prop);
+    const mesh = try parse_mesh(allocator, data, false);
+    _ = mesh;
 }
-
-var methods = [_]py.PyMethodDef{
-    .{
-        .ml_name = "parse_mesh",
-        .ml_meth = parse_mesh_py,
-        .ml_flags = py.METH_VARARGS,
-        .ml_doc = "Parse a RFC mesh",
-    },
-    .{
-        .ml_name = null,
-        .ml_meth = null,
-        .ml_flags = 0,
-        .ml_doc = null,
-    },
-};
-
-var module = py.PyModuleDef{
-    .m_base = .{},
-    .m_name = "x_mesh_zig",
-    .m_doc = "Zig mesh parser",
-    .m_size = -1,
-    .m_methods = &methods[0],
-};
-
-export fn PyInit_x_mesh_zig() callconv(.c) ?*py.PyObject {
-    return py.PyModule_Create(&module);
-}
-
-// pub fn main(init: std.process.Init) !void {
-//     const cwd: std.Io.Dir = .cwd();
-
-//     var dba: std.heap.DebugAllocator(.{}) = .init;
-//     // defer _ = dba.deinit();
-//     const allocator: Allocator = dba.allocator();
-
-//     const data: []u8 = try cwd.readFileAlloc(init.io, "D:\\Steam Library\\steamapps\\common\\Exanima\\Objlib\\step xaa02 03.rfc", init.gpa, .unlimited);
-//     defer init.gpa.free(data);
-
-//     const mesh = try parse_mesh(allocator, data, false);
-//     _ = mesh;
-// }

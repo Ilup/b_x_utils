@@ -13,6 +13,8 @@ from .rdb.locales import LocaleDB
 from .rdb.charroles import RoleDB
 from .pwr import PowerTree
 
+from .zig_modules import x_rft_zig
+
 import os
 import bpy
 
@@ -49,6 +51,7 @@ class RPK:
         elif signature == 0xDBAE0D01: return LocaleDB.parse(file, signature = signature)
         elif signature & 0xFFFFFF00 == 0xDBCB0D00: return RoleDB.parse(file, signature)
         elif signature == 0xAFCE01CE: return PowerTree.parse(file, length = size - 4)
+        elif signature == 0x3EEFAD01: return x_rft_zig.parse_terrain(file.read(size-4))
         else: raise Exception(f'Entry ({name}) has an unknown signature ({hex(signature)}) @ {hex(file.tell())} in {file.name}')
     def parse_itemdb(self) -> ItemDB: #requires special treatment since it needs to access two different files.
         file = self.file

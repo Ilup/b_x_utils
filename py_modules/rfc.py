@@ -104,7 +104,19 @@ class SortedTileset:
 def get_nibbles_from_bytes(data: bytes) -> list[int]:
     return [n for b in data for n in (b >> 4, b & 0b1111)]
 
-def parse_tilemap(rfp: RFP, file: BufferedReader, scene: bpy.types.Scene, import_settings: dict[str,bool], length: int, *args, **kwargs) -> tuple[str,None]:
+def build_terrain_sector(rft, pos_x: int, pos_y: int, col: bpy.types.Collection) -> bpy.types.Object:
+    tmesh = bpy.data.meshes.new(f'Terrain-{pos_x}-{pos_y}')
+    try: 
+        verts,faces = rft.get_sector(pos_x,pos_y)
+    except:
+        return None
+    else:
+        tmesh.from_pydata(verts,[],faces)
+        obj = bf.create_object(name = f'Terrain-{pos_x}-{pos_y}',data = tmesh)
+        col.objects.link(obj)
+        return obj
+
+def parse_tilemap(rfp: RFP, name: str, file: BufferedReader, scene: bpy.types.Scene, import_settings: dict[str,bool], length: int, *args, **kwargs) -> tuple[str,None]:
     if not import_settings['import_sectors']: 
         file.seek(file.tell() + length)
         return 'Tiles',None 
@@ -125,11 +137,15 @@ def parse_tilemap(rfp: RFP, file: BufferedReader, scene: bpy.types.Scene, import
     print(f"Building sector map with size {hex(dim_y)}*{hex(dim_x)}")
     built_tiles_count = 0
     placed_objs = 0
+    rft = rfp.resource.parse_entry(name = name.replace('.rfc','') + '.rft')
+    print(rft)
     for y in range(dim_y):
         pos_y = y_start + y*scale
         for x in range(dim_x):
             pos_x = x_start + x*scale
+
             tile = tiles_arr[y,x]
+            if tile[0,4] & 0b1000 and (tobj := build_terrain_sector(rft, x, y, col)): tobj.location = pos_x,pos_y,0
             if not tile[0,5] & 0b1000: continue
             if tile[2,1] != 15: #Walls
                 wallset = wallsets[tile[2,1]]
@@ -191,7 +207,6 @@ def build_node(rfp: RFP, file: BufferedReader, rfc_sig: int, col: bpy.types.Coll
         material_names,
         faceints,
         faceflags,) = x_mesh_zig.parse_mesh(file_data, is_prop)
-
         mesh = bpy.data.meshes.new(name)
         
         mesh.from_pydata(vertices,[],face_vert_indices)
@@ -376,7 +391,7 @@ def parse_rfc(rfp: RFP, name: str, file: BufferedReader, size: int, scene: bpy.t
     while file.tell() - start < size:
         chunk_signature,chunk_length = read_uints(file,2)
         func = rfc_chunk_dict.get(chunk_signature)
-        chunk_type,data = func(rfp = rfp, file = file, signature = signature, rfc_sig = signature, 
+        chunk_type,data = func(rfp = rfp, name = name, file = file, signature = signature, rfc_sig = signature, 
                                scene = scene, length = chunk_length, import_settings = import_settings, 
                                is_prop = is_prop, 
                                itemdb = itemdb, itemdb_dict = itemdb_dict,
