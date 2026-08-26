@@ -15,14 +15,14 @@ pub const TerrainError: type = error{ UnknownTTileChunk, UnknownTerrainBlock, In
 
 const TSECTOR_SIZE = sector_width * sector_width;
 
-const BrushSector: type = struct { name: [16]u8 = [_]u8{0} ** 16, map: [TSECTOR_SIZE]u8 = [_]u8{0} ** (TSECTOR_SIZE) };
+const BrushSector: type = struct { name: [16]u8 = @splat(0), map: [TSECTOR_SIZE]u8 = @splat(0) };
 
 const sector_face_amount = (sector_width - 1) * (sector_width - 1);
 const TerrainSector: type = struct {
     pos_x: u32 = 0,
     pos_y: u32 = 0,
     scale: f32 = 20.0,
-    heightmap: [TSECTOR_SIZE]f32 = [_]f32{0} ** (TSECTOR_SIZE),
+    heightmap: [TSECTOR_SIZE]f32 = @splat(0),
     brushes: []BrushSector = &.{},
     //holes
     pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
@@ -63,7 +63,7 @@ const TerrainSector: type = struct {
     }
 };
 
-pub const Brush: type = struct { name: [16]u8 = [_]u8{0} ** 16, map: [0xF1 * 0xF1]u8 = [_]u8{0} ** (0xF1 * 0xF1) };
+pub const Brush: type = struct { name: [16]u8 = @splat(0), map: [0xF1 * 0xF1]u8 = @splat(0) };
 
 pub fn read_brush(dr: *DataReader) Brush {
     var brush: Brush = .{};
@@ -79,10 +79,10 @@ pub const TTile: type = struct {
     pos_x: u32 = 0,
     pos_y: u32 = 0,
     u3: u32 = 0,
-    heightmap: [0xF4 * 0xF4]f32 = [_]f32{0.0} ** (0xF4 * 0xF4),
+    heightmap: [0xF4 * 0xF4]f32 = @splat(0),
     brushes: []Brush = &.{},
     //Holemap data structure is unknown. hold the raw data if it's present.
-    hole_data: [0x1D2F]u8 = [_]u8{0.0} ** (0x1D2F),
+    hole_data: [0x1D2F]u8 = @splat(0),
     pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("TTile(hole_flag=0x{x}, pos_x=0x{x}, pos_y=0x{x}, u3=0x{x}, min_height={}, max_height={}, brushes_n=0x{x})\n", .{ self.hole_flag, self.pos_x, self.pos_y, self.u3, std.mem.min(f32, &self.heightmap), std.mem.max(f32, &self.heightmap), self.brushes.len });
     }
@@ -152,7 +152,7 @@ const TileCoord: type = struct { x: u32, y: u32 };
 pub const Terrain = struct {
     arena: std.heap.ArenaAllocator,
     unk: u32 = 0,
-    material: [16]u8 = [_]u8{0} ** 16,
+    material: [16]u8 = @splat(0),
     scale: f32 = 20,
     dim_x: u32 = 1,
     dim_y: u32 = 1,

@@ -1,7 +1,4 @@
-pub const py = @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
+pub const py = @import("python");
 
 const dr_module = @import("data_reader.zig");
 const Vector3df = dr_module.Vector3df;
