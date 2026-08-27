@@ -50,7 +50,7 @@ pub const MaterialRange: type = extern struct {
     ignored: u32 = 0,
     start: u32 = 0,
     stop: u32 = 0,
-    name: [16]u8 = .{0} ** 16,
+    name: [16]u8 = @splat(0),
     pub fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("MaterialRef(name={s}, start=0x{x}, stop=0x{x})", .{ std.mem.sliceTo(&self.name, 0), self.start, self.stop });
     }
@@ -339,7 +339,7 @@ pub fn read_constraint(dr: *DataReader) MotionConstraint {
     return constraint;
 }
 
-const Physics: type = struct { raw_data: []u8 = &.{}, density: f32 = 0.0, spheres: []PhysicsSphere = &.{}, motion_constraints: []MotionConstraint = &.{}, sound: [16]u8 = .{0} ** 16 };
+const Physics: type = struct { raw_data: []u8 = &.{}, density: f32 = 0.0, spheres: []PhysicsSphere = &.{}, motion_constraints: []MotionConstraint = &.{}, sound: [16]u8 = @splat(0) };
 
 pub fn read_physics(dr: *DataReader, allocator: Allocator, length: u32, is_prop: bool) !Physics {
     const start: u32 = dr.pos;

@@ -237,7 +237,7 @@ pub fn read_constraint(dr: *DataReader) MotionConstraint {
     return constraint;
 }
 
-const Physics: type = struct { raw_data: []u8 = &.{}, density: f32 = 0.0, spheres: []PhysicsSphere = &.{}, motion_constraints: []MotionConstraint = &.{}, sound: [16]u8 = .{0} ** 16 };
+const Physics: type = struct { raw_data: []u8 = &.{}, density: f32 = 0.0, spheres: []PhysicsSphere = &.{}, motion_constraints: []MotionConstraint = &.{}, sound: [16]u8 = @splat(0) };
 
 pub fn read_physics(dr: *DataReader, allocator: Allocator, length: u32, is_prop: bool) !Physics {
     const start: u32 = dr.pos;
@@ -423,7 +423,7 @@ export fn parse_mesh_py(self: ?*py.PyObject, args: ?*py.PyObject) callconv(.c) ?
 
     const allocator = arena.allocator();
 
-    var ptr: []u8 = undefined;
+    var ptr: [*]u8 = undefined;
     var len: py.Py_ssize_t = undefined;
     var is_prop: bool = undefined;
 

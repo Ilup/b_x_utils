@@ -2,10 +2,7 @@ const std: type = @import("std");
 
 const mp: type = @import("x_mesh.zig");
 
-const c = @cImport({
-    @cDefine("PY_SSIZE_T_CLEAN", {});
-    @cInclude("Python.h");
-});
+const c = @import("python");
 
 // fn u32_slice_to_list(u32s: []u32) ?*c.PyObject {
 //     const result = c.PyList_New(u32s.len);
