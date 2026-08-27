@@ -24,6 +24,8 @@ import os
 
 def check_if_should_merge_obj(obj: bpy.types.Object) -> bool:
     if '+F' in obj.name: return False
+    elif not obj.data: return False
+    elif not obj.data.materials: return False
     #Ignore only "black" objects
     elif [mat for mat in obj.data.materials if mat.name.lower() != 'black' and mat.name.lower() != '_null']: return True
 

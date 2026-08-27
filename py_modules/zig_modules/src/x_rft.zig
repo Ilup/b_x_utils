@@ -13,6 +13,8 @@ const print = std.debug.print;
 
 pub const TerrainError: type = error{ UnknownTTileChunk, UnknownTerrainBlock, InvalidTerrain, SectorOutOfBounds, TerrainTileNotFound };
 
+const sector_width = (0xF1 / 8) + 1;
+
 const TSECTOR_SIZE = sector_width * sector_width;
 
 const BrushSector: type = struct { name: [16]u8 = @splat(0), map: [TSECTOR_SIZE]u8 = @splat(0) };
@@ -29,7 +31,7 @@ const TerrainSector: type = struct {
         try writer.print("TerrainSector(pos_x=0x{x}, pos_y=0x{x}, scale={}, min_height={}, max_height={}, brushes_n=0x{x})\n", .{ self.pos_x, self.pos_y, self.scale, std.mem.min(f32, &self.heightmap), std.mem.max(f32, &self.heightmap), self.brushes.len });
     }
     pub fn heightmap_to_positions_py(self: @This()) ?*py.PyObject {
-        const pos_offset = -self.scale * (sector_width - 1) / 2;
+        const pos_offset = -self.scale * sector_width / 2;
         const vectors_list = py.PyList_New(TSECTOR_SIZE);
         const vertical_scaling = self.scale * 0.1;
         for (0..sector_width) |y| {
@@ -72,8 +74,6 @@ pub fn read_brush(dr: *DataReader) Brush {
     return brush;
 }
 
-const sector_width = 0xF1 / 8;
-
 pub const TTile: type = struct {
     hole_flag: u32 = 0,
     pos_x: u32 = 0,
@@ -89,9 +89,8 @@ pub const TTile: type = struct {
     pub fn get_sector(self: @This(), pos_x: u32, pos_y: u32, scale: f32, allocator: Allocator) !TerrainSector {
         const l_pos_x = pos_x % 8; //Relative to the tile's corner
         const l_pos_y = pos_y % 8;
-        const start_x = l_pos_x * sector_width; //Positions on the grid
-        const start_y = l_pos_y * sector_width;
-
+        const start_x = l_pos_x * (sector_width - 1); //Positions on the grid
+        const start_y = l_pos_y * (sector_width - 1);
         var sector: TerrainSector = .{ .pos_x = pos_x, .pos_y = pos_y, .scale = scale, .brushes = try allocator.alloc(BrushSector, self.brushes.len) };
 
         //Copy the names only once.
