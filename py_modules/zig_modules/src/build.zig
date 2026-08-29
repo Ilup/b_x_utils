@@ -65,10 +65,6 @@ pub fn build(b: *std.Build) void {
         
         lib.root_module.addImport("python", py_mod);
         
-        //lib.root_module.addIncludePath(b.path("cpython")); // look for pyconfig.h in here
-        //lib.root_module.addIncludePath(b.path("cpython/Include"));
-        // lib.root_module.addCSourceFile(.{ .file = b.path("py_module.c") });
-
         const dest_sub_path = if (target.result.os.tag == .windows) b.fmt("{s}.pyd", .{module.name}) else b.fmt("{s}.so", .{module.name});
 
         const target_output = b.addInstallArtifact(lib, .{
