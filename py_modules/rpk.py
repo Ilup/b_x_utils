@@ -12,8 +12,10 @@ from .rdb.races import RaceDB
 from .rdb.locales import LocaleDB
 from .rdb.charroles import RoleDB
 from .pwr import PowerTree
+from . import rfi
+from .ftb import FTB
 
-from .zig_modules import x_rft_zig
+from .zig_modules import x_rft_zig #Convert this to an actual rft py module
 
 import os
 import bpy
@@ -52,6 +54,8 @@ class RPK:
         elif signature & 0xFFFFFF00 == 0xDBCB0D00: return RoleDB.parse(file, signature)
         elif signature == 0xAFCE01CE: return PowerTree.parse(file, length = size - 4)
         elif signature == 0x3EEFAD01: return x_rft_zig.parse_terrain(file.read(size-4))
+        elif signature == 0x1D2D3DC6: return rfi.parse_image(file.read(size-4),name)
+        elif signature & 0xFFFFFF00 == 0x3EEFBD00: return FTB.parse(file, signature & 0xFF)
         else: raise Exception(f'Entry ({name}) has an unknown signature ({hex(signature)}) @ {hex(file.tell())} in {file.name}')
     def parse_itemdb(self) -> ItemDB: #requires special treatment since it needs to access two different files.
         file = self.file
@@ -64,6 +68,6 @@ class RPK:
         itemdb.parse_strdb()
         return itemdb
     def __repr__(self) -> str:
-        return f'RPK(file={self.file.name}, signature={self.signature}, name={self.name}, entries_amount={hex(len(self.lookup_table))}, data_start={hex(self.data_start)})'
+        return f'RPK(name={self.name})'
 
         

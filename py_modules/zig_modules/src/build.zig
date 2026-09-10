@@ -10,6 +10,7 @@ pub fn build(b: *std.Build) void {
     }{
         .{ .name = "x_mesh_zig", .source = "x_mesh.zig" },
         .{ .name = "x_rft_zig", .source = "x_rft.zig" },
+        .{ .name = "x_rfi_zig", .source = "x_rfi.zig" },
     };
     for (modules) |module| {
         const lib = b.addLibrary(.{
@@ -49,7 +50,7 @@ pub fn build(b: *std.Build) void {
                 lib.step.dependOn(&pyconfig.step);
             }
         }
-        
+
         const py_tc = b.addTranslateC(.{
             .root_source_file = b.addWriteFiles().add("py_tc.h",
                 \\#define PY_SSIZE_T_CLEAN
@@ -62,9 +63,9 @@ pub fn build(b: *std.Build) void {
         py_tc.addIncludePath(b.path("cpython")); // look for pyconfig.h in here
         py_tc.addIncludePath(b.path("cpython/include"));
         const py_mod = py_tc.createModule();
-        
+
         lib.root_module.addImport("python", py_mod);
-        
+
         //lib.root_module.addIncludePath(b.path("cpython")); // look for pyconfig.h in here
         //lib.root_module.addIncludePath(b.path("cpython/Include"));
         // lib.root_module.addCSourceFile(.{ .file = b.path("py_module.c") });

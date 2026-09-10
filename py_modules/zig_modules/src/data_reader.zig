@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const print = std.debug.print;
+
 pub const Vector2df: type = extern struct {
     x: f32 = 0.0,
     y: f32 = 0.0,
@@ -78,6 +80,9 @@ pub const DataReader: type = struct {
         return val;
     }
     pub fn read_u64(self: *@This()) u64 {
+        if (self.pos + 8 > self.data.len) {
+            print("Tried to read a u64 out of bounds!\n", .{});
+        }
         const val: u64 = std.mem.bytesToValue(u64, self.data[self.pos .. self.pos + 8]);
         self.pos += 8;
         return val;

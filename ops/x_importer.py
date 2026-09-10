@@ -27,6 +27,7 @@ class ImportXFile(bpy.types.Operator):
     def invoke(self, context, event):
         return context.window_manager.invoke_confirm(self, event)
     def execute(self, context):
+        os.system('cls' if os.name == 'nt' else 'clear')
         start_time = time.perf_counter()
         print(f'Importing exanima file {self.filepath}')
         addon_name = __package__.split('.')[0]
