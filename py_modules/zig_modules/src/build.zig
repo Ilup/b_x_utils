@@ -10,6 +10,7 @@ pub fn build(b: *std.Build) void {
     }{
         .{ .name = "x_mesh_zig", .source = "x_mesh.zig" },
         .{ .name = "x_rft_zig", .source = "x_rft.zig" },
+        .{ .name = "x_rfi_zig", .source = "x_rfi.zig" },
     };
     for (modules) |module| {
         const lib = b.addLibrary(.{

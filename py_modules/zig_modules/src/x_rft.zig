@@ -47,7 +47,7 @@ const TerrainSector = struct {
         }
         return vectors_list;
     }
-    fn generate_face_indices(self: @This()) !*py.PyObject {
+    pub fn generate_face_indices_py(self: @This()) !*py.PyObject {
         _ = self;
         const face_width = SECTOR_WIDTH - 1;
         const faces_list = try pyb.list(face_width * face_width);
@@ -63,6 +63,22 @@ const TerrainSector = struct {
             }
         }
         return faces_list;
+    }
+    pub fn convert_brushes_to_py(self: @This()) !*py.PyObject {
+        const brushes_list = try pyb.list(self.brushes.len);
+        for (self.brushes, 0..self.brushes.len) |brush, i| {
+            const tuple = try pyb.tuple(2);
+            const clean_name = std.mem.sliceTo(brush.name.bytes[0..], 0);
+            pyb.tupleSetUnchecked(tuple, 0, py.PyUnicode_Decode(clean_name.ptr, @intCast(clean_name.len), "cp1252", null));
+            const brush_weight_list = try pyb.list(TSECTOR_SIZE);
+            for (brush.map, 0..TSECTOR_SIZE) |val, j| { // Values range from [0,255]. Convert them to [0.0,1.0]
+                const val_f: f32 = @floatFromInt(val);
+                pyb.listSetUnchecked(brush_weight_list, j, try pyb.float(val_f / 255.0));
+            }
+            pyb.tupleSetUnchecked(tuple, 1, brush_weight_list);
+            pyb.listSetUnchecked(brushes_list, i, tuple);
+        }
+        return brushes_list;
     }
 };
 
@@ -186,6 +202,28 @@ const Terrain = struct {
         };
         return ttile.get_sector(self.arena_state.allocator(), pos_x, pos_y, self.scale);
     }
+    pub fn get_brush_names_py(self: *@This()) !*py.PyObject {
+        const arena = self.arena_state.allocator();
+        var brush_names: std.StringHashMapUnmanaged(void) = .empty;
+        defer brush_names.deinit(arena);
+
+        var tile_iter = self.tile_map.iterator();
+        while (tile_iter.next()) |entry| {
+            const tile = entry.value_ptr.*;
+            for (tile.brushes) |*brush| {
+                const clean_name = std.mem.sliceTo(brush.name.bytes[0..], 0);
+                try brush_names.put(arena, clean_name, {});
+            }
+        }
+        const brush_name_list = try pyb.list(brush_names.count());
+        var brush_iter = brush_names.iterator();
+        var brush_index: usize = 0;
+        while (brush_iter.next()) |entry| : (brush_index += 1) {
+            const brush_name = entry.key_ptr.*;
+            pyb.listSetUnchecked(brush_name_list, brush_index, py.PyUnicode_Decode(brush_name.ptr, @intCast(brush_name.len), "cp1252", null));
+        }
+        return brush_name_list;
+    }
 };
 
 fn read_terrain(fixed: *XaReader) !Terrain {
@@ -210,6 +248,7 @@ fn read_terrain(fixed: *XaReader) !Terrain {
             0xBDAD => {
                 const ttile = try read_ttile(arena, fixed, block_length);
                 // std.debug.print("{f}", .{ttile});
+
                 try terrain.tile_map.put(arena, .{ .x = ttile.pos_x, .y = ttile.pos_y }, ttile);
             },
             else => {
@@ -227,6 +266,7 @@ var terrain_type: ?pyb.TypeObject = null;
 const TerrainObject = extern struct {
     ob_base: py.PyObject,
     terrain: *Terrain,
+    material: *py.PyObject,
 };
 
 fn terrain_dealloc(self_obj: ?*py.PyObject) callconv(.c) void {
@@ -239,9 +279,10 @@ fn terrain_dealloc(self_obj: ?*py.PyObject) callconv(.c) void {
 }
 
 fn sector_to_py(sector: TerrainSector) !*py.PyObject {
-    const result = try pyb.tuple(2);
+    const result = try pyb.tuple(3);
     pyb.tupleSetUnchecked(result, 0, try sector.heightmap_to_positions_py());
-    pyb.tupleSetUnchecked(result, 1, try sector.generate_face_indices());
+    pyb.tupleSetUnchecked(result, 1, try sector.generate_face_indices_py());
+    pyb.tupleSetUnchecked(result, 2, try sector.convert_brushes_to_py());
     return result;
 }
 
@@ -266,12 +307,42 @@ fn terrain_get_sector(self_obj: ?*py.PyObject, args: ?*py.PyObject) callconv(.c)
     };
 }
 
-const terrain_type_methods = [_]py.PyMethodDef{
+
+fn terrain_get_brush_names(self_obj: ?*py.PyObject, args: ?*py.PyObject) callconv(.c) ?*py.PyObject {
+    _ = args;
+
+    const self: *TerrainObject = @ptrCast(@alignCast(self_obj));
+
+    return self.terrain.get_brush_names_py() catch |err| {
+        std.debug.print("get_brush_names_py error: {}\n", .{err});
+        _ = py.PyErr_NoMemory();
+        return null;
+    };
+}
+
+const terrain_type_members = [_]py.PyMemberDef{
+    .{
+        .name = "material",
+        .type = py.Py_T_OBJECT_EX,
+        .offset = @offsetOf(TerrainObject, "material"),
+        .flags = 0,
+        .doc = "Terrain material",
+    },
+    .{},
+};
+
+const terrain_type_methods = [_]py.PyMethodDef {
     .{
         .ml_name = "get_sector",
         .ml_meth = terrain_get_sector,
         .ml_flags = py.METH_VARARGS,
         .ml_doc = "Get a terrain sector.",
+    },
+    .{
+        .ml_name = "get_brushes",
+        .ml_meth = terrain_get_brush_names,
+        .ml_flags = py.METH_VARARGS,
+        .ml_doc = "Get brush names.",
     },
     std.mem.zeroes(py.PyMethodDef),
 };
@@ -284,6 +355,10 @@ const terrain_type_slots = [_]py.PyType_Slot{
     .{
         .slot = py.Py_tp_methods,
         .pfunc = @ptrCast(@constCast(&terrain_type_methods)),
+    },
+    .{
+        .slot = py.Py_tp_members,
+        .pfunc = @ptrCast(@constCast(&terrain_type_members)),
     },
     std.mem.zeroes(py.PyType_Slot),
 };
@@ -324,6 +399,8 @@ fn parse_terrain_py(self: ?*py.PyObject, args: ?*py.PyObject) callconv(.c) ?*py.
 
     const obj: *TerrainObject = @ptrCast(@alignCast(py_obj));
     obj.terrain = terrain_ptr;
+    const material = std.mem.trimEnd(u8, terrain_ptr.material.bytes[0..], "\x00");
+    obj.material = py.PyUnicode_Decode(material.ptr, @intCast(material.len), "cp1252", null);
 
     return py_obj;
 }
@@ -348,7 +425,8 @@ var module = py.PyModuleDef{
 
 export fn PyInit_x_rft_zig() callconv(.c) ?*py.PyObject {
     const mod = py.PyModule_Create(&module) orelse return null;
-
+    
+    //the PyMethodDef goes into the PyType_Slot which go into the PyType_Spec which goes into this
     const type_obj = pyb.TypeObject.fromSpec(&terrain_type_spec) catch |err| switch (err) {
         error.Failed => {
             py.Py_DECREF(mod);

@@ -104,14 +104,21 @@ class SortedTileset:
 def get_nibbles_from_bytes(data: bytes) -> list[int]:
     return [n for b in data for n in (b >> 4, b & 0b1111)]
 
-def build_terrain_sector(rft, pos_x: int, pos_y: int, col: bpy.types.Collection) -> bpy.types.Object:
+def build_terrain_sector(rft, pos_x: int, pos_y: int, col: bpy.types.Collection, mat: bpy.types.Material, built_brushes: list[str]) -> bpy.types.Object:
     tmesh = bpy.data.meshes.new(f'Terrain-{pos_x}-{pos_y}')
     try: 
-        verts,faces = rft.get_sector(pos_x,pos_y)
+        verts,faces,brushes = rft.get_sector(pos_x,pos_y)
     except:
         return None
     else:
         tmesh.from_pydata(verts,[],faces)
+        for name,weights in brushes:
+            if name not in built_brushes: 
+                # print(f'Brush ({repr(name)}) is not in the built brushes: {built_brushes}')
+                continue
+            attr = tmesh.attributes.new(name, 'FLOAT', 'POINT')
+            attr.data.foreach_set("value", weights)
+        tmesh.materials.append(mat)
         obj = bf.create_object(name = f'Terrain-{pos_x}-{pos_y}',data = tmesh)
         col.objects.link(obj)
         return obj
@@ -121,6 +128,7 @@ def parse_tilemap(rfp: RFP, name: str, file: BufferedReader, scene: bpy.types.Sc
         file.seek(file.tell() + length)
         return 'Tiles',None 
     col = bf.verify_colname_in_scene(scene, 'Sectors')
+    t_col = bf.verify_colname_in_scene(scene,'Terrain')
     print(f'Getting tilesets...')
     wallsets:  list[SortedTileset] = [rfp.get_set(read_name(file) + '.rfc') for i in range(read_uints(file,1))]
     floorsets: list[SortedTileset] = [rfp.get_set(read_name(file) + '.rfc') for i in range(read_uints(file,1))]
@@ -137,15 +145,20 @@ def parse_tilemap(rfp: RFP, name: str, file: BufferedReader, scene: bpy.types.Sc
     print(f"Building sector map with size {hex(dim_y)}*{hex(dim_x)}")
     built_tiles_count = 0
     placed_objs = 0
+    scene.exanima_brushes.clear()
     rft = rfp.resource.parse_entry(name = name.replace('.rfc','') + '.rft')
-    print(rft)
+    print(rft.material)
+    ftb = rfp.resource.parse_entry(f"{rft.material.lower()}.ftb", rfp)
+    rft_found_brushes = rft.get_brushes()
+    mat,built_brushes = ftb.build_brushes(rfp, rft_found_brushes)
+    # mat,built_brushes = ftb.build_brushes(rfp, list(ftb.brush_dict.keys()) + list(ftb.mixed_brush_dict.keys()))
+    for name in built_brushes: scene.exanima_brushes.add().name = name
     for y in range(dim_y):
         pos_y = y_start + y*scale
         for x in range(dim_x):
             pos_x = x_start + x*scale
-
             tile = tiles_arr[y,x]
-            if tile[0,4] & 0b1000 and (tobj := build_terrain_sector(rft, x, y, col)): tobj.location = pos_x,pos_y,0
+            if tile[0,4] & 0b1000 and (tobj := build_terrain_sector(rft, x, y, t_col, mat, built_brushes)): tobj.location = pos_x,pos_y,0
             if not tile[0,5] & 0b1000: continue
             if tile[2,1] != 15: #Walls
                 wallset = wallsets[tile[2,1]]

@@ -27,7 +27,7 @@ def check_if_should_merge_obj(obj: bpy.types.Object) -> bool:
     elif not obj.data: return False
     elif not obj.data.materials: return False
     #Ignore only "black" objects
-    elif [mat for mat in obj.data.materials if mat.name.lower() != 'black' and mat.name.lower() != '_null']: return True
+    elif [mat for mat in obj.data.materials if mat.name.lower() != 'black' and mat.name.lower() != '_null' and mat.name.lower() != '_black']: return True
 
 @dataclass
 class RFP:
@@ -53,6 +53,8 @@ class RFP:
     pwrs:          list[PowerTree] = field(default_factory = list)
     locales:       LocaleDB = field(default_factory = LocaleDB)
 
+    built_images: dict[str,bpy.types.Image] = field(default_factory = dict)
+    
     built_props: dict[str,list[bpy.types.Object]]        = field(default_factory = dict)
     built_world_models: dict[str,list[bpy.types.Object]] = field(default_factory = dict)
     built_char_models: dict[str,list[bpy.types.Object]]  = field(default_factory = dict)
@@ -99,6 +101,8 @@ class RFP:
                                    5: None,
                                    6: resource.parse_entry('pwr_displace.pwr') if 'pwr_displace.pwr' in resource.lookup_table else None},
                    locales      = resource.parse_entry('locales.rdb'))
+    def __repr__(self):
+        return f'RFP(path={self.dir})'
     @classmethod
     def get_role_names(cls, exanima_dir: str) -> list[str]:
         if not RFP.role_names: #Only do this stuff once.
@@ -107,6 +111,20 @@ class RFP:
             rfp = RFP.parse(exanima_dir)
             RFP.role_names = [(name,name,'') for name in rfp.roledb.get_names()]
         return RFP.role_names
+    def get_image(self, image_name: str) -> bpy.types.Image | None:
+        # print(f'Attempting to get image {image_name}')
+        if image_name in self.built_images: return self.built_images[image_name]
+        if image := bpy.data.images.get(image_name): 
+            self.built_images[image_name] = image
+            return image
+        for tex_rpk in self.textures:
+            if image_name in tex_rpk.lookup_table:
+                image = tex_rpk.parse_entry(image_name)
+                self.built_images[image_name] = image
+                return image
+        else:
+            print(f'Failed to find image {image_name} in texture rpks {self.textures}')
+            return None
     def get_set(self, set_name: str) -> SortedTileset:
         import_name = set_name
         set_name = set_name[:-4].lower() #Cut off .rfc and make it lowercase.
