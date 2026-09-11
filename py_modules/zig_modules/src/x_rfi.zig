@@ -233,23 +233,19 @@ pub fn read_bc5_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
         for (0..blocks_x) |block_x| { //cell
             const block_pos = block_pos_y + block_x;
 
-            const r_block = try reader.take(u64);
-            const r0: u8 = @truncate(r_block);
-            const r1: u8 = @truncate(r_block >> 8);
+            const r_block: AlphaBlock = @bitCast(try reader.take(u64));
             const rs = interpolate_alphas(
-                @as(f32, r0) / 0xFF,
-                @as(f32, r1) / 0xFF,
+                @as(f32, r_block.alpha0) / 0xFF,
+                @as(f32, r_block.alpha1) / 0xFF,
             );
-            const picked_rs = r_block >> 16;
+            const picked_rs = r_block.picked_alphas;
 
-            const g_block = try reader.take(u64);
-            const g0: u8 = @truncate(g_block);
-            const g1: u8 = @truncate(g_block >> 8);
+            const g_block: AlphaBlock = @bitCast(try reader.take(u64));
             const gs = interpolate_alphas(
-                @as(f32, g0) / 0xFF,
-                @as(f32, g1) / 0xFF,
+                @as(f32, g_block.alpha0) / 0xFF,
+                @as(f32, g_block.alpha1) / 0xFF,
             );
-            const picked_gs = g_block >> 16;
+            const picked_gs = g_block.picked_alphas;
 
             var j: u32 = 4;
             while (j > 0) {
