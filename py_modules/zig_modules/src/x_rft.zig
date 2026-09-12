@@ -7,6 +7,7 @@ const Name = @import("structs.zig").Name;
 
 const Allocator = std.mem.Allocator;
 const XaReader = @import("XaReader.zig");
+const OnceSetterSafeGetter = @import("meta.zig").OnceSetterSafeGetter;
 
 const TerrainError = error {
     UnknownTTileChunk,
@@ -150,7 +151,9 @@ fn read_ttile(arena: Allocator, fixed: *XaReader, length: u32) !TTile {
         try fixed.readSlice(u8, &hole_data);
     }
     
-    var brushes: []Brush = &.{};
+    var chunks: OnceSetterSafeGetter(struct {
+        brushes: []Brush,
+    }) = .empty;
     while (fixed.r.seek - start < length) {
         const chunk_start = fixed.r.seek;
         const signature = try fixed.take(u32);
@@ -159,8 +162,9 @@ fn read_ttile(arena: Allocator, fixed: *XaReader, length: u32) !TTile {
         switch (signature) {
             0xBD01 => {
                 const brushes_n = try fixed.take(u32);
-                brushes = try arena.alloc(Brush, brushes_n);
+                const brushes = try arena.alloc(Brush, brushes_n);
                 try fixed.readSlice(Brush, brushes);
+                try chunks.set(.brushes, brushes);
             },
             else => {
                 std.debug.print("Found an unknown terrain tile chunk 0x{x} starting @ 0x{x}\n", .{ signature, chunk_start });
@@ -174,7 +178,7 @@ fn read_ttile(arena: Allocator, fixed: *XaReader, length: u32) !TTile {
         .pos_y = pos_y,
         .u3 = unknown,
         .heightmap = heightmap,
-        .brushes = brushes,
+        .brushes = try chunks.get(.brushes),
         .hole_data = hole_data,
     };
 }
