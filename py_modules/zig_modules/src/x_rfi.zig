@@ -13,8 +13,8 @@ const PixelColor = struct {
     r: f32,
     g: f32,
     b: f32,
-    fn fromBlockColor(v: ColorBlock.Color) @This() {
-        return .{.r = v.r, .g = v.g, .b = v.b};
+    fn from(r: f32, g: f32, b: f32) @This() {
+        return .{.r = r, .g = g, .b = b};
     }
 };
 
@@ -34,6 +34,14 @@ const AlphaBlock = packed struct (u64) {
     picked_alphas: u48,
 };
 
+pub fn pixelColorFromBlockColor(bc: ColorBlock.Color) PixelColor {
+    return .from(
+        @as(f32, bc.r) / std.math.maxInt(@FieldType(ColorBlock.Color, "r")),
+        @as(f32, bc.g) / std.math.maxInt(@FieldType(ColorBlock.Color, "g")),
+        @as(f32, bc.b) / std.math.maxInt(@FieldType(ColorBlock.Color, "b")),
+    );
+}
+
 pub fn read_bc1_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
     // std.debug.print("Decompressing bc1...\n", .{});
     const blocks_x = (width + 3) / 4;
@@ -48,8 +56,8 @@ pub fn read_bc1_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
             const block_pos = block_pos_y + block_x;
 
             const color_block: ColorBlock = @bitCast(try reader.take(u64));
-            const color0: PixelColor = .fromBlockColor(color_block.color0);
-            const color1: PixelColor = .fromBlockColor(color_block.color1);
+            const color0: PixelColor = pixelColorFromBlockColor(color_block.color0);
+            const color1: PixelColor = pixelColorFromBlockColor(color_block.color1);
             const colors: [4]PixelColor = .{
                 color0,
                 color1,
@@ -178,8 +186,8 @@ pub fn read_bc3_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
             var picked_alphas = alpha_block.picked_alphas;
 
             const color_block: ColorBlock = @bitCast(try reader.take(u64));
-            const color0: PixelColor = .fromBlockColor(color_block.color0);
-            const color1: PixelColor = .fromBlockColor(color_block.color1);
+            const color0: PixelColor = pixelColorFromBlockColor(color_block.color0);
+            const color1: PixelColor = pixelColorFromBlockColor(color_block.color1);
             const colors: [4]PixelColor = .{
                 color0,
                 color1,
