@@ -2,6 +2,7 @@ const std = @import("std");
 
 const py = @import("python");
 const pyb = @import("py_bindings.zig");
+const pyo = pyb.object_types;
 
 const XaReader = @import("XaReader.zig");
 
@@ -20,9 +21,12 @@ const PixelColor = struct {
 
 const ColorBlock = packed struct (u64) {
     const Color = packed struct (u16) {
-        b: u5,
-        g: u6,
-        r: u5,
+        const R = u5;
+        const G = u6;
+        const B = u5;
+        b: B,
+        g: G,
+        r: R,
     };
     color0: Color,
     color1: Color,
@@ -36,24 +40,22 @@ const AlphaBlock = packed struct (u64) {
 
 pub fn pixelColorFromBlockColor(bc: ColorBlock.Color) PixelColor {
     return .from(
-        @as(f32, bc.r) / std.math.maxInt(@FieldType(ColorBlock.Color, "r")),
-        @as(f32, bc.g) / std.math.maxInt(@FieldType(ColorBlock.Color, "g")),
-        @as(f32, bc.b) / std.math.maxInt(@FieldType(ColorBlock.Color, "b")),
+        @as(f32, bc.r) / std.math.maxInt(@TypeOf(bc.b)),
+        @as(f32, bc.g) / std.math.maxInt(@TypeOf(bc.g)),
+        @as(f32, bc.b) / std.math.maxInt(@TypeOf(bc.r)),
     );
 }
 
-pub fn read_bc1_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
+pub fn read_bc1_py(reader: *XaReader, width: u32, height: u32) !pyo.ListObject {
     // std.debug.print("Decompressing bc1...\n", .{});
-    const blocks_x = (width + 3) / 4;
-    const blocks_y = (height + 3) / 4;
-    const pixels_list = try pyb.list(width * height * 4); //Blender holds pixels as a flattened rgba list; [r0,g0,b0,a0,r1,g1,b1,a1,...]
+    const blocks_x = std.math.divCeil(u32, width , 4) catch unreachable;
+    const blocks_y = std.math.divCeil(u32, height, 4) catch unreachable;
+    const pixels_list: pyo.ListObject = try .initPlaceholders(width * height * 4); //Blender holds pixels as a flattened rgba list; [r0,g0,b0,a0,r1,g1,b1,a1,...]
     
-    var block_y = blocks_y;
-    while (block_y > 0) { //Read the blocks upside down...
-        block_y -= 1;
-        const block_pos_y = block_y * width;
+    for (0..blocks_y) |block_y_inv| { //Read the blocks upside down...
+        const block_y = blocks_y - 1 - block_y_inv;
         for (0..blocks_x) |block_x| { //cell
-            const block_pos = block_pos_y + block_x;
+            const block_pos = block_y*width + block_x;
 
             const color_block: ColorBlock = @bitCast(try reader.take(u64));
             const color0: PixelColor = pixelColorFromBlockColor(color_block.color0);
@@ -74,18 +76,17 @@ pub fn read_bc1_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
             };
 
             var picked_colors = color_block.picked_colors;
-            var j: u32 = 4;
-            while (j > 0) { //Read the block upside down
-                j -= 1;
+            for (0..4) |j_inv| {
+                const j = 4 - 1 - j_inv;
                 const pixel_y = block_pos * 4 + j * width;
                 for (0..4) |i| {
                     const pixel_pos = pixel_y + i;
                     const pixel_index = pixel_pos * 4;
                     const color = colors[picked_colors & 0b11];
-                    pyb.listSetUnchecked(pixels_list, pixel_index    , try pyb.float(color.r));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 1, try pyb.float(color.g));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 2, try pyb.float(color.b));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 3, try pyb.float(1.0));
+                    pixels_list.setUnchecked(pixel_index    , try pyb.float(color.r));
+                    pixels_list.setUnchecked(pixel_index + 1, try pyb.float(color.g));
+                    pixels_list.setUnchecked(pixel_index + 2, try pyb.float(color.b));
+                    pixels_list.setUnchecked(pixel_index + 3, try pyb.float(1.0));
 
                     picked_colors >>= 2; //Lop off the color just inspected
                 }
@@ -123,18 +124,16 @@ fn interpolate_alphas(alpha0: f32, alpha1: f32) [8]f32 {
     }
 }
 
-pub fn read_bc4_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
+pub fn read_bc4_py(reader: *XaReader, width: u32, height: u32) !pyo.ListObject {
     // std.debug.print("Decompressing bc4...\n", .{});
-    const blocks_x = (width + 3) / 4;
-    const blocks_y = (height + 3) / 4;
-    const pixels_list = try pyb.list(width * height * 4); //Blender holds pixels as a flattened rgba list; [r0,g0,b0,a0,r1,g1,b1,a1,...]
-
-    var block_y = blocks_y;
-    while (block_y > 0) { //Read it upside down...
-        block_y -= 1;
-        const block_pos_y = block_y * width;
+    const blocks_x = std.math.divCeil(u32, width , 4) catch unreachable;
+    const blocks_y = std.math.divCeil(u32, height, 4) catch unreachable;
+    const pixels_list: pyo.ListObject = try .initPlaceholders(width * height * 4); //Blender holds pixels as a flattened rgba list; [r0,g0,b0,a0,r1,g1,b1,a1,...]
+    
+    for (0..blocks_y) |block_y_inv| { //Read it upside down...
+        const block_y = blocks_y - 1 - block_y_inv;
         for (0..blocks_x) |block_x| { //cell
-            const block_pos = block_pos_y + block_x;
+            const block_pos = block_y*width + block_x;
 
             const alpha_block: AlphaBlock = @bitCast(try reader.take(u64));
             const alphas = interpolate_alphas(
@@ -143,19 +142,18 @@ pub fn read_bc4_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
             );
 
             var picked_alphas = alpha_block.picked_alphas;
-            var j: u32 = 4;
-            while (j > 0) {
-                j -= 1;
+            for (0..4) |j_inv| {
+                const j = 4 - 1 - j_inv;
                 const pixel_y = block_pos * 4 + j * width;
                 for (0..4) |i| {
                     const pixel_pos = pixel_y + i;
                     const pixel_index = pixel_pos * 4;
                     const alpha = alphas[picked_alphas & 0b111];
 
-                    pyb.listSetUnchecked(pixels_list, pixel_index    , try pyb.float(alpha));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 1, try pyb.float(alpha));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 2, try pyb.float(alpha));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 3, try pyb.float(1.0));
+                    pixels_list.setUnchecked(pixel_index    , try pyb.float(alpha));
+                    pixels_list.setUnchecked(pixel_index + 1, try pyb.float(alpha));
+                    pixels_list.setUnchecked(pixel_index + 2, try pyb.float(alpha));
+                    pixels_list.setUnchecked(pixel_index + 3, try pyb.float(1.0));
 
                     picked_alphas >>= 3; //Lop off the color just inspected
                 }
@@ -165,17 +163,15 @@ pub fn read_bc4_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
     return pixels_list;
 }
 
-pub fn read_bc3_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
-    const blocks_x = (width + 3) / 4;
-    const blocks_y = (height + 3) / 4;
-    const pixels_list = try pyb.list(width * height * 4); //Blender holds pixels as a flattened rgba list; [r0,g0,b0,a0,r1,g1,b1,a1,...]
+pub fn read_bc3_py(reader: *XaReader, width: u32, height: u32) !pyo.ListObject {
+    const blocks_x = std.math.divCeil(u32, width , 4) catch unreachable;
+    const blocks_y = std.math.divCeil(u32, height, 4) catch unreachable;
+    const pixels_list: pyo.ListObject = try .initPlaceholders(width * height * 4); //Blender holds pixels as a flattened rgba list; [r0,g0,b0,a0,r1,g1,b1,a1,...]
 
-    var block_y = blocks_y;
-    while (block_y > 0) { //Read it upside down...
-        block_y -= 1;
-        const block_pos_y = block_y * width;
+    for (0..blocks_y) |block_y_inv| { //Read it upside down...
+        const block_y = blocks_y - 1 - block_y_inv;
         for (0..blocks_x) |block_x| { //cell
-            const block_pos = block_pos_y + block_x;
+            const block_pos = block_y*width + block_x;
 
             const alpha_block: AlphaBlock = @bitCast(try reader.take(u64));
             const alphas = interpolate_alphas(
@@ -205,9 +201,8 @@ pub fn read_bc3_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
 
             var picked_colors = color_block.picked_colors;
 
-            var j: u32 = 4;
-            while (j > 0) {
-                j -= 1;
+            for (0..4) |j_inv| {
+                const j = 4 - 1 - j_inv;
                 const pixel_y = block_pos * 4 + j * width;
                 for (0..4) |i| {
                     const pixel_pos = pixel_y + i;
@@ -215,10 +210,10 @@ pub fn read_bc3_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
                     const alpha = alphas[picked_alphas & 0b111];
                     const color = colors[picked_colors & 0b11];
 
-                    pyb.listSetUnchecked(pixels_list, pixel_index    , try pyb.float(color.r));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 1, try pyb.float(color.g));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 2, try pyb.float(color.b));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 3, try pyb.float(alpha));
+                    pixels_list.setUnchecked(pixel_index    , try pyb.float(color.r));
+                    pixels_list.setUnchecked(pixel_index + 1, try pyb.float(color.g));
+                    pixels_list.setUnchecked(pixel_index + 2, try pyb.float(color.b));
+                    pixels_list.setUnchecked(pixel_index + 3, try pyb.float(alpha));
 
                     picked_alphas >>= 3; //Lop off the color just inspected
                     picked_colors >>= 2; //Lop off the color just inspected
@@ -229,17 +224,15 @@ pub fn read_bc3_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
     return pixels_list;
 }
 
-pub fn read_bc5_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
-    const blocks_x = (width + 3) / 4;
-    const blocks_y = (height + 3) / 4;
-    const pixels_list = try pyb.list(width * height * 4);
+pub fn read_bc5_py(reader: *XaReader, width: u32, height: u32) !pyo.ListObject {
+    const blocks_x = std.math.divCeil(u32, width , 4) catch unreachable;
+    const blocks_y = std.math.divCeil(u32, height, 4) catch unreachable;
+    const pixels_list: pyo.ListObject = try .initPlaceholders(width * height * 4);
 
-    var block_y = blocks_y;
-    while (block_y > 0) { //Read it upside down...
-        block_y -= 1;
-        const block_pos_y = block_y * width;
+    for (0..blocks_y) |block_y_inv| { //Read it upside down...
+        const block_y = blocks_y - 1 - block_y_inv;
         for (0..blocks_x) |block_x| { //cell
-            const block_pos = block_pos_y + block_x;
+            const block_pos = block_y*width + block_x;
 
             const r_block: AlphaBlock = @bitCast(try reader.take(u64));
             const rs = interpolate_alphas(
@@ -255,9 +248,8 @@ pub fn read_bc5_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
             );
             const picked_gs = g_block.picked_alphas;
 
-            var j: u32 = 4;
-            while (j > 0) {
-                j -= 1;
+            for (0..4) |j_inv| {
+                const j = 4 - 1 - j_inv;
                 const pixel_y = block_pos * 4 + j * width;
                 for (0..4) |i| {
                     const pixel_pos = pixel_y + i;
@@ -265,10 +257,10 @@ pub fn read_bc5_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
                     const r = rs[picked_rs & 0b111];
                     const g = gs[picked_gs & 0b111];
 
-                    pyb.listSetUnchecked(pixels_list, pixel_index    , try pyb.float(r));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 1, try pyb.float(g));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 2, try pyb.float(0.0));
-                    pyb.listSetUnchecked(pixels_list, pixel_index + 3, try pyb.float(1.0));
+                    pixels_list.setUnchecked(pixel_index    , try pyb.float(r));
+                    pixels_list.setUnchecked(pixel_index + 1, try pyb.float(g));
+                    pixels_list.setUnchecked(pixel_index + 2, try pyb.float(0.0));
+                    pixels_list.setUnchecked(pixel_index + 3, try pyb.float(1.0));
                 }
             }
         }
@@ -276,7 +268,7 @@ pub fn read_bc5_py(reader: *XaReader, width: u32, height: u32) !*py.PyObject {
     return pixels_list;
 }
 
-pub fn read_pixels_py(reader: *XaReader, format: u32, width: u32, height: u32) !*py.PyObject {
+pub fn read_pixels_py(reader: *XaReader, format: u32, width: u32, height: u32) !pyo.ListObject {
     //this sucks. figure out the proper way of doing this.
     switch (format) {
         0x813BC600, 0x0100C600, 0x01004200 => {
@@ -298,7 +290,7 @@ pub fn read_pixels_py(reader: *XaReader, format: u32, width: u32, height: u32) !
     }
 }
 
-pub fn read_image_py(reader: *XaReader) !*py.PyObject {
+pub fn read_image_py(reader: *XaReader) !pyo.TupleObject {
     const width     = try reader.take(u32);
     const height    = try reader.take(u32);
     const single    = try reader.take(u32);
@@ -310,11 +302,11 @@ pub fn read_image_py(reader: *XaReader) !*py.PyObject {
     _ = flags;
     _ = run_flags;
     _ = size;
-    const tuple = try pyb.tuple(3);
-    pyb.tupleSetUnchecked(tuple, 0, try pyb.long(width));
-    pyb.tupleSetUnchecked(tuple, 1, try pyb.long(height));
+    const tuple: pyo.TupleObject = try .initPlaceholders(3);
+    tuple.setUnchecked(0, try pyb.long(width));
+    tuple.setUnchecked(1, try pyb.long(height));
     const pixels = try read_pixels_py(reader, options, width, height);
-    pyb.tupleSetUnchecked(tuple, 2, pixels);
+    tuple.setUnchecked(2, pixels);
     return tuple;
 }
 
@@ -333,9 +325,10 @@ pub fn py_meth_read_image(self: ?*py.PyObject, args: ?*py.PyObject) callconv(.c)
     };
     var reader: XaReader = .fixed(bytestream);
 
-    return read_image_py(&reader) catch {
+    const ret_image = read_image_py(&reader) catch {
         return null;
     };
+    return ret_image.toObject().ptr;
 }
 
 var methods = [_]py.PyMethodDef{

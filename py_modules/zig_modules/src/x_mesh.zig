@@ -4,6 +4,7 @@ const OnceSetterSafeGetter = @import("meta.zig").OnceSetterSafeGetter;
 const py_wr = @import("py_wrapper_funcs.zig");
 const py = @import("python");
 const pyb = @import("py_bindings.zig");
+const pyo = pyb.object_types;
 
 const XaReader = @import("XaReader.zig");
 
@@ -29,8 +30,11 @@ const ParserError = error {
 
 const VertexBundle = struct { verts: []Vector3df, uverts: []Vector2df };
 fn read_verts(arena: Allocator, fixed: *XaReader) !VertexBundle {
-    var verts: []Vector3df = &.{};
-    var uverts: []Vector2df = &.{};
+    var chunks: OnceSetterSafeGetter(struct {
+        verts : []Vector3df,
+        uverts: []Vector2df,
+    }) = .empty;
+    
     const bundles_n = try std.math.add(u32, try fixed.take(u32), 1);
     for (0..bundles_n) |_| {
         const vstart = fixed.r.seek;
@@ -41,12 +45,14 @@ fn read_verts(arena: Allocator, fixed: *XaReader) !VertexBundle {
         _ = vflag; //unused. dunno what it's for.
         switch (vtype & 0xFF0000) {
             0xF30000 => {
-                verts = try arena.alloc(Vector3df, verts_n);
+                const verts = try arena.alloc(Vector3df, verts_n);
                 try fixed.readSlice(Vector3df, verts);
+                try chunks.set(.verts, verts);
             },
             0xF20000 => {
-                uverts = try arena.alloc(Vector2df, verts_n);
+                const uverts = try arena.alloc(Vector2df, verts_n);
                 try fixed.readSlice(Vector2df, uverts);
+                try chunks.set(.uverts, uverts);
             },
             0xB40000 => {
                 try fixed.discard(4 * verts_n); //vert colors. unused?
@@ -61,13 +67,13 @@ fn read_verts(arena: Allocator, fixed: *XaReader) !VertexBundle {
         }
     }
     // std.debug.print("Finished reading verts @ 0x{x}\n", .{fixed.r.seek});
-    // std.debug.print("First Vertex: {f}\n", .{vb.verts[0]});
-    // std.debug.print("First UVertex: {f}\n", .{vb.uverts[0]});
-    return .{.verts = verts, .uverts = uverts};
+    // std.debug.print("First Vertex: {f}\n", .{try chunks.get(.verts)});
+    // std.debug.print("First UVertex: {f}\n", .{try chunks.get(.verts)});
+    return .{.verts = try chunks.get(.verts), .uverts = try chunks.get(.uverts)};
 }
 
 
-fn read_map(map: []u32, bitwidth: MeshMapBitwidth, fixed: *XaReader) !void {
+fn read_map(fixed: *XaReader, map: []u32, bitwidth: MeshMapBitwidth) !void {
     // For reading the vertexmaps to be used in the facemap.
     // Store them as u32 so it will always have enough bits to store them without needing extra logipy.
     switch (bitwidth) {
@@ -96,9 +102,11 @@ fn read_meshmaps(arena: Allocator, fixed: *XaReader) !MeshMapBundle {
         return error.UnknownSignature;
     }
 
-    var edgemap: []u32 = &.{};
-    var uvmap: []u32 = &.{};
-
+    var chunks: OnceSetterSafeGetter(struct {
+        edgemap: []u32,
+        uvmap  : []u32,
+    }) = .empty;
+    
     try fixed.discard(4); //null, unused?
     const cmpverts = try std.math.add(u32, try fixed.take(u32), 1);
     const materials_n = try std.math.add(u32, try fixed.take(u32), 1);
@@ -114,12 +122,14 @@ fn read_meshmaps(arena: Allocator, fixed: *XaReader) !MeshMapBundle {
         const vmflag = try fixed.take(u32);
         switch (vmflag & 0xFF) {
             0x1 => {
-                edgemap = try arena.alloc(u32, cmpverts);
-                try read_map(edgemap, bitwidth, fixed);
+                const edgemap = try arena.alloc(u32, cmpverts);
+                try read_map(fixed, edgemap, bitwidth);
+                try chunks.set(.edgemap, edgemap);
             },
             0x10 => {
-                uvmap = try arena.alloc(u32, cmpverts);
-                try read_map(uvmap, bitwidth, fixed);
+                const uvmap = try arena.alloc(u32, cmpverts);
+                try read_map(fixed, uvmap, bitwidth);
+                try chunks.set(.uvmap, uvmap);
             },
             0x2 => {
                 try fixed.discard(@intFromEnum(bitwidth) / 8 * cmpverts); //Unknown map
@@ -136,8 +146,8 @@ fn read_meshmaps(arena: Allocator, fixed: *XaReader) !MeshMapBundle {
         .cmpverts = cmpverts,
         .materials = materials,
         .bitwidth = bitwidth,
-        .edgemap = edgemap,
-        .uvmap = uvmap,
+        .edgemap = try chunks.get(.edgemap),
+        .uvmap = try chunks.get(.uvmap),
     };
 }
 
@@ -174,8 +184,11 @@ fn read_faces(arena: Allocator, fixed: *XaReader, meshmaps: MeshMapBundle, lengt
         }
     }
     
-    var ints: []u8 = &.{};
-    var flags: []u32 = &.{};
+    var chunks: OnceSetterSafeGetter(struct {
+        ints : []u8,
+        flags: []u32,
+    }) = .empty;
+    
     if (!is_prop) {
         // std.debug.print("Finished reading faces @ 0x{x}\n", .{fixed.r.seek});
         while (fixed.r.seek - start < length) {
@@ -186,12 +199,14 @@ fn read_faces(arena: Allocator, fixed: *XaReader, meshmaps: MeshMapBundle, lengt
             _ = chunklength;
             switch (chunktag & 0xFF0F) {
                 0x3D02 => {
-                    ints = try arena.alloc(u8, faces_n);
+                    const ints = try arena.alloc(u8, faces_n);
                     try fixed.readSlice(u8, ints);
+                    try chunks.set(.ints, ints);
                 },
                 0x3D03 => {
-                    flags = try arena.alloc(u32, faces_n);
+                    const flags = try arena.alloc(u32, faces_n);
                     try fixed.readSlice(u32, flags);
+                    try chunks.set(.flags, flags);
                 },
                 else => {
                     return error.UnknownFaceChunk;
@@ -207,8 +222,8 @@ fn read_faces(arena: Allocator, fixed: *XaReader, meshmaps: MeshMapBundle, lengt
         .faces_n = faces_n,
         .faces = faces,
         .material_indices = material_indices,
-        .ints = ints,
-        .flags = flags,
+        .ints = try chunks.get(.ints),
+        .flags = try chunks.get(.flags),
     };
 }
 
@@ -245,8 +260,11 @@ fn read_physics(arena: Allocator, fixed: *XaReader, length: u32, is_prop: bool) 
     const start = fixed.r.seek;
     // std.debug.print("Reading physics @ 0x{x}\n", .{start - 8}); //Where the signature is at.
     if (!is_prop) {
-        var spheres: []PhysicsSphere = &.{};
-        var motion_constraints: []MotionConstraint = &.{};
+        var chunks: OnceSetterSafeGetter(struct {
+            spheres: []PhysicsSphere,
+            motion_constraints: []MotionConstraint,
+        }) = .empty;
+        
         const raw_data = fixed.r.buffered()[0..length];
         const unk_int = try fixed.take(u32);
         _ = unk_int;
@@ -259,12 +277,14 @@ fn read_physics(arena: Allocator, fixed: *XaReader, length: u32, is_prop: bool) 
             switch (chunktag) {
                 0xCD00 => { //Collision
                     try fixed.discard(4); //null
-                    spheres = try arena.alloc(PhysicsSphere, try fixed.take(u32));
+                    const spheres = try arena.alloc(PhysicsSphere, try fixed.take(u32));
                     try fixed.readSlice(PhysicsSphere, spheres);
+                    try chunks.set(.spheres, spheres);
                 },
                 0xDDB0 => { //Constraints
-                    motion_constraints = try arena.alloc(MotionConstraint, try fixed.take(u32));
+                    const motion_constraints = try arena.alloc(MotionConstraint, try fixed.take(u32));
                     try fixed.readSlice(MotionConstraint, motion_constraints);
+                    try chunks.set(.motion_constraints, motion_constraints);
                 },
                 0xDDB3 => { //Sound
                     return error.NotImplemented;
@@ -277,8 +297,8 @@ fn read_physics(arena: Allocator, fixed: *XaReader, length: u32, is_prop: bool) 
         return .{
             .raw_data = raw_data,
             .density = density,
-            .spheres = spheres,
-            .motion_constraints = motion_constraints,
+            .spheres = try chunks.get(.spheres),
+            .motion_constraints = try chunks.get(.motion_constraints),
             .sound = @splat(0),
         };
     } else {
@@ -378,11 +398,11 @@ fn parse_mesh(arena: Allocator, data: []u8, is_prop: bool) !MeshResult {
 }
 
 const FaceChunkObjects = struct {
-    face_vert_indices: *py.PyObject,
-    loop_uvs: *py.PyObject,
-    material_indices: *py.PyObject,
-    faceints: *py.PyObject,
-    faceflags: *py.PyObject,
+    face_vert_indices: pyo.ListObject,
+    loop_uvs: pyo.ListObject,
+    material_indices: pyo.ListObject,
+    faceints: pyo.ListObject,
+    faceflags: pyo.ListObject,
 };
 fn facechunk_to_py(vertexbundle: VertexBundle, meshmaps: MeshMapBundle, facechunk: FaceChunk, is_prop: bool) !FaceChunkObjects {
     const uverts: []Vector2df = vertexbundle.uverts;
@@ -390,34 +410,34 @@ fn facechunk_to_py(vertexbundle: VertexBundle, meshmaps: MeshMapBundle, facechun
     const uvmap: []u32 = meshmaps.uvmap;
     const faces: []Triple(u32) = facechunk.faces;
 
-    const face_vert_indices_list = try pyb.list(faces.len);
-    const loop_uvs_list = try pyb.list(faces.len * 3 * 2); //for use in bpy.types.Mesh.loops.foreach_set ; Need to hold the uvs for each loop.
+    const face_vert_indices_list: pyo.ListObject = try .initPlaceholders(faces.len);
+    const loop_uvs_list: pyo.ListObject = try .initPlaceholders(faces.len * 3 * 2); //for use in bpy.types.Mesh.loops.foreach_set ; Need to hold the uvs for each loop.
     for (faces, 0..) |face, i| {
-        const tuple = try pyb.tuple(3);
-        pyb.tupleSetUnchecked(tuple, 0, try pyb.long(edgemap[face.items[2]]));
-        pyb.tupleSetUnchecked(tuple, 1, try pyb.long(edgemap[face.items[1]]));
-        pyb.tupleSetUnchecked(tuple, 2, try pyb.long(edgemap[face.items[0]]));
-        pyb.listSetUnchecked(face_vert_indices_list, i, tuple);
+        const tuple: pyo.TupleObject = try .initPlaceholders(3);
+        tuple.setUnchecked(0, try pyb.long(edgemap[face.items[2]]));
+        tuple.setUnchecked(1, try pyb.long(edgemap[face.items[1]]));
+        tuple.setUnchecked(2, try pyb.long(edgemap[face.items[0]]));
+        face_vert_indices_list.setUnchecked(i, tuple);
         const base_index = i * 6; //For the uv indexing
         for ([3]u32{ face.items[2], face.items[1], face.items[0] }, 0..) |index, j| {
             const uv = uverts[uvmap[index]];
-            pyb.listSetUnchecked(loop_uvs_list, base_index + j * 2    , try pyb.float(uv.x));
-            pyb.listSetUnchecked(loop_uvs_list, base_index + j * 2 + 1, try pyb.float(uv.y));
+            loop_uvs_list.setUnchecked(base_index + j * 2    , try pyb.float(uv.x));
+            loop_uvs_list.setUnchecked(base_index + j * 2 + 1, try pyb.float(uv.y));
         }
     }
-    const material_indices_list = try pyb.list(facechunk.material_indices.len);
+    const material_indices_list: pyo.ListObject = try .initPlaceholders(facechunk.material_indices.len);
     for (facechunk.material_indices, 0..) |mat_i, i| {
-        pyb.listSetUnchecked(material_indices_list, i, try pyb.long(mat_i));
+        material_indices_list.setUnchecked(i, try pyb.long(mat_i));
     }
 
-    const faceints_list  = try pyb.list(facechunk.ints.len);
-    const faceflags_list = try pyb.list(facechunk.flags.len);
+    const faceints_list : pyo.ListObject = try .initPlaceholders(facechunk.ints.len);
+    const faceflags_list: pyo.ListObject = try .initPlaceholders(facechunk.flags.len);
     if (!is_prop) {
         for (facechunk.ints, 0..) |fi, i| {
-            pyb.listSetUnchecked(faceints_list, i, try pyb.long(fi));
+            faceints_list.setUnchecked(i, try pyb.long(fi));
         }
         for (facechunk.flags, 0..) |ff, i| {
-            pyb.listSetUnchecked(faceflags_list, i, try pyb.long(ff));
+            faceflags_list.setUnchecked(i, try pyb.long(ff));
         }
     }
     return .{
@@ -429,24 +449,22 @@ fn facechunk_to_py(vertexbundle: VertexBundle, meshmaps: MeshMapBundle, facechun
     };
 }
 
-fn meshresult_to_py(mr: MeshResult, is_prop: bool) !*py.PyObject {
-    const result = try pyb.tuple(7); //verts, vert_indices, loop_uvs, faceints, faceflags // DO THIS LATER physics, statics, softbody
+fn meshresult_to_py(mr: MeshResult, is_prop: bool) !pyo.TupleObject {
+    const result: pyo.TupleObject = try .initPlaceholders(7);
     const p_verts = try py_wr.vector3df_slice_to_python(mr.vertexbundle.verts);
-    const material_names = try pyb.tuple(mr.meshmaps.materials.len);
+    const material_names: pyo.TupleObject = try .initPlaceholders(mr.meshmaps.materials.len);
     for (mr.meshmaps.materials, 0..) |mat, i| {
-        pyb.tupleSetUnchecked(material_names, i, py.PyUnicode_Decode(&mat.name.bytes, @intCast(mat.name.bytes.len), "cp1252", null));
+        material_names.setUnchecked(i, try pyo.UnicodeObject.from(&mat.name.bytes, .cp1252));
     }
     const p_fc = try facechunk_to_py(mr.vertexbundle, mr.meshmaps, mr.facechunk, is_prop);
-    const items = [_]*py.PyObject{
-        p_verts,
-        p_fc.face_vert_indices,
-        p_fc.loop_uvs,
-        p_fc.material_indices,
-        material_names,
-        p_fc.faceints,
-        p_fc.faceflags,
-    };
-    py_wr.fill_py_tuple(result, &items);
+    
+    result.setUnchecked(0, p_verts);
+    result.setUnchecked(1, p_fc.face_vert_indices);
+    result.setUnchecked(2, p_fc.loop_uvs);
+    result.setUnchecked(3, p_fc.material_indices);
+    result.setUnchecked(4, material_names);
+    result.setUnchecked(5, p_fc.faceints);
+    result.setUnchecked(6, p_fc.faceflags);
     return result;
 }
 
@@ -473,9 +491,10 @@ export fn parse_mesh_py(self: ?*py.PyObject, args: ?*py.PyObject) callconv(.c) ?
         return null;
     };
 
-    return meshresult_to_py(mesh_result, is_prop) catch {
+    const ret_object = meshresult_to_py(mesh_result, is_prop) catch {
         return null;
     };
+    return ret_object.toObject().ptr;
 }
 
 var methods = [_]py.PyMethodDef{

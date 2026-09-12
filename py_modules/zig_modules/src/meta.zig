@@ -1,6 +1,6 @@
 const std = @import("std");
 
-/// A wrapper around struct argument T that enforces only being able to set a field once via set(...) and only being able to obtain a field via get(...) if already set.
+/// A wrapper around struct argument T that encourages only being able to set a field once via set(...) and only being able to obtain a field via get(...) if already set.
 /// Useful when looping through chunks of unverified data where there may be missing expected chunks or too many of an expected chunk type.
 pub fn OnceSetterSafeGetter(T: type) type {
     return struct {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const py = @import("python");
 const pyb = @import("py_bindings.zig");
+const pyo = pyb.object_types;
 
 const Name = @import("structs.zig").Name;
 
@@ -31,52 +32,56 @@ const TerrainSector = struct {
     fn format(self: @This(), writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("TerrainSector(pos_x=0x{x}, pos_y=0x{x}, scale={}, min_height={}, max_height={}, brushes_n=0x{x})\n", .{ self.pos_x, self.pos_y, self.scale, std.mem.min(f32, &self.heightmap), std.mem.max(f32, &self.heightmap), self.brushes.len });
     }
-    fn heightmap_to_positions_py(self: @This()) !*py.PyObject {
+    fn heightmap_to_positions_py(self: @This()) !pyo.ListObject {
         const pos_offset = -self.scale * SECTOR_WIDTH / 2;
-        const vectors_list = try pyb.list(TSECTOR_SIZE);
+        const vectors_list: pyo.ListObject = try .initPlaceholders(TSECTOR_SIZE);
         const vertical_scaling = self.scale * 0.1;
-        for (0..SECTOR_WIDTH) |y| {
-            const y_pos = @as(f32, @floatFromInt(y)) * self.scale + pos_offset;
-            for (0..SECTOR_WIDTH) |x| {
-                const tuple = try pyb.tuple(3);
-                pyb.tupleSetUnchecked(tuple, 0, try pyb.float(@as(f32, @floatFromInt(x)) * self.scale + pos_offset));
-                pyb.tupleSetUnchecked(tuple, 1, try pyb.float(y_pos));
-                pyb.tupleSetUnchecked(tuple, 2, try pyb.float(self.heightmap[y * SECTOR_WIDTH + x] * vertical_scaling));
-                pyb.listSetUnchecked(vectors_list, y * SECTOR_WIDTH + x, tuple);
+        for (0..SECTOR_WIDTH) |y_usize| {
+            const y: u8 = @intCast(y_usize);
+            const y_pos = @as(f32, y) * self.scale + pos_offset;
+            for (0..SECTOR_WIDTH) |x_usize| {
+                const x: u8 = @intCast(x_usize);
+                const tuple: pyo.TupleObject = try .initPlaceholders(3);
+                tuple.setUnchecked(0, try pyb.float(@as(f32, x) * self.scale + pos_offset));
+                tuple.setUnchecked(1, try pyb.float(y_pos));
+                tuple.setUnchecked(2, try pyb.float(self.heightmap[y * SECTOR_WIDTH + x] * vertical_scaling));
+                vectors_list.setUnchecked(y * SECTOR_WIDTH + x, tuple);
             }
         }
         return vectors_list;
     }
-    pub fn generate_face_indices_py(self: @This()) !*py.PyObject {
+    pub fn generate_face_indices_py(self: @This()) !pyo.ListObject {
         _ = self;
         const face_width = SECTOR_WIDTH - 1;
-        const faces_list = try pyb.list(face_width * face_width);
+        const faces_list: pyo.ListObject = try .initPlaceholders(face_width * face_width);
         for (0..face_width) |y| {
             for (0..face_width) |x| {
                 const vertex = y * SECTOR_WIDTH + x;
-                const tuple = try pyb.tuple(4);
-                pyb.tupleSetUnchecked(tuple, 0, try pyb.long(vertex));
-                pyb.tupleSetUnchecked(tuple, 1, try pyb.long(vertex + 1));
-                pyb.tupleSetUnchecked(tuple, 2, try pyb.long(vertex + SECTOR_WIDTH + 1));
-                pyb.tupleSetUnchecked(tuple, 3, try pyb.long(vertex + SECTOR_WIDTH));
-                pyb.listSetUnchecked(faces_list, y * face_width + x, tuple);
+                const tuple: pyo.TupleObject = try .initPlaceholders(4);
+                tuple.setUnchecked(0, try pyb.long(vertex));
+                tuple.setUnchecked(1, try pyb.long(vertex + 1));
+                tuple.setUnchecked(2, try pyb.long(vertex + SECTOR_WIDTH + 1));
+                tuple.setUnchecked(3, try pyb.long(vertex + SECTOR_WIDTH));
+                faces_list.setUnchecked(y * face_width + x, tuple);
             }
         }
         return faces_list;
     }
-    pub fn convert_brushes_to_py(self: @This()) !*py.PyObject {
-        const brushes_list = try pyb.list(self.brushes.len);
+    pub fn convert_brushes_to_py(self: @This()) !pyo.ListObject {
+        const brushes_list: pyo.ListObject = try .initPlaceholders(self.brushes.len);
         for (self.brushes, 0..self.brushes.len) |brush, i| {
-            const tuple = try pyb.tuple(2);
-            const clean_name = std.mem.sliceTo(brush.name.bytes[0..], 0);
-            pyb.tupleSetUnchecked(tuple, 0, py.PyUnicode_Decode(clean_name.ptr, @intCast(clean_name.len), "cp1252", null));
-            const brush_weight_list = try pyb.list(TSECTOR_SIZE);
+            const tuple: pyo.TupleObject = try .initPlaceholders(2);
+            
+            const clean_name = std.mem.sliceTo(&brush.name.bytes, 0);
+            tuple.setUnchecked(0, try pyo.UnicodeObject.from(clean_name, .cp1252));
+            
+            const brush_weight_list: pyo.ListObject = try .initPlaceholders(TSECTOR_SIZE);
             for (brush.map, 0..TSECTOR_SIZE) |val, j| { // Values range from [0,255]. Convert them to [0.0,1.0]
-                const val_f: f32 = @floatFromInt(val);
-                pyb.listSetUnchecked(brush_weight_list, j, try pyb.float(val_f / 255.0));
+                brush_weight_list.setUnchecked(j, try pyb.float(@as(f32, val) / 255.0));
             }
-            pyb.tupleSetUnchecked(tuple, 1, brush_weight_list);
-            pyb.listSetUnchecked(brushes_list, i, tuple);
+            tuple.setUnchecked(1, brush_weight_list);
+            
+            brushes_list.setUnchecked(i, tuple);
         }
         return brushes_list;
     }
@@ -202,7 +207,7 @@ const Terrain = struct {
         };
         return ttile.get_sector(self.arena_state.allocator(), pos_x, pos_y, self.scale);
     }
-    pub fn get_brush_names_py(self: *@This()) !*py.PyObject {
+    pub fn get_brush_names_py(self: *@This()) !pyo.ListObject {
         const arena = self.arena_state.allocator();
         var brush_names: std.StringHashMapUnmanaged(void) = .empty;
         defer brush_names.deinit(arena);
@@ -211,16 +216,16 @@ const Terrain = struct {
         while (tile_iter.next()) |entry| {
             const tile = entry.value_ptr.*;
             for (tile.brushes) |*brush| {
-                const clean_name = std.mem.sliceTo(brush.name.bytes[0..], 0);
+                const clean_name = std.mem.sliceTo(&brush.name.bytes, 0);
                 try brush_names.put(arena, clean_name, {});
             }
         }
-        const brush_name_list = try pyb.list(brush_names.count());
+        const brush_name_list: pyo.ListObject = try .initPlaceholders(brush_names.count());
         var brush_iter = brush_names.iterator();
         var brush_index: usize = 0;
         while (brush_iter.next()) |entry| : (brush_index += 1) {
             const brush_name = entry.key_ptr.*;
-            pyb.listSetUnchecked(brush_name_list, brush_index, py.PyUnicode_Decode(brush_name.ptr, @intCast(brush_name.len), "cp1252", null));
+            brush_name_list.setUnchecked(brush_index, try pyo.UnicodeObject.from(brush_name, .cp1252));
         }
         return brush_name_list;
     }
@@ -261,12 +266,12 @@ fn read_terrain(fixed: *XaReader) !Terrain {
     return terrain;
 }
 
-var terrain_type: ?pyb.TypeObject = null;
+var terrain_type: ?pyo.TypeObject = null;
 
 const TerrainObject = extern struct {
     ob_base: py.PyObject,
     terrain: *Terrain,
-    material: *py.PyObject,
+    material: pyo.UnicodeObject,
 };
 
 fn terrain_dealloc(self_obj: ?*py.PyObject) callconv(.c) void {
@@ -278,11 +283,11 @@ fn terrain_dealloc(self_obj: ?*py.PyObject) callconv(.c) void {
     py.Py_TYPE(self_obj).*.tp_free.?(self_obj);
 }
 
-fn sector_to_py(sector: TerrainSector) !*py.PyObject {
-    const result = try pyb.tuple(3);
-    pyb.tupleSetUnchecked(result, 0, try sector.heightmap_to_positions_py());
-    pyb.tupleSetUnchecked(result, 1, try sector.generate_face_indices_py());
-    pyb.tupleSetUnchecked(result, 2, try sector.convert_brushes_to_py());
+fn sector_to_py(sector: TerrainSector) !pyo.TupleObject {
+    const result: pyo.TupleObject = try .initPlaceholders(3);
+    result.setUnchecked(0, try sector.heightmap_to_positions_py());
+    result.setUnchecked(1, try sector.generate_face_indices_py());
+    result.setUnchecked(2, try sector.convert_brushes_to_py());
     return result;
 }
 
@@ -302,9 +307,10 @@ fn terrain_get_sector(self_obj: ?*py.PyObject, args: ?*py.PyObject) callconv(.c)
         return null;
     };
 
-    return sector_to_py(sector) catch {
+    const ret_tuple = sector_to_py(sector) catch {
         return null;
     };
+    return ret_tuple.toObject().ptr;
 }
 
 
@@ -313,11 +319,12 @@ fn terrain_get_brush_names(self_obj: ?*py.PyObject, args: ?*py.PyObject) callcon
 
     const self: *TerrainObject = @ptrCast(@alignCast(self_obj));
 
-    return self.terrain.get_brush_names_py() catch |err| {
+    const ret_collection = self.terrain.get_brush_names_py() catch |err| {
         std.debug.print("get_brush_names_py error: {}\n", .{err});
         _ = py.PyErr_NoMemory();
         return null;
     };
+    return ret_collection.toObject().ptr;
 }
 
 const terrain_type_members = [_]py.PyMemberDef{
@@ -399,8 +406,8 @@ fn parse_terrain_py(self: ?*py.PyObject, args: ?*py.PyObject) callconv(.c) ?*py.
 
     const obj: *TerrainObject = @ptrCast(@alignCast(py_obj));
     obj.terrain = terrain_ptr;
-    const material = std.mem.trimEnd(u8, terrain_ptr.material.bytes[0..], "\x00");
-    obj.material = py.PyUnicode_Decode(material.ptr, @intCast(material.len), "cp1252", null);
+    const material = std.mem.sliceTo(&terrain_ptr.material.bytes, 0);
+    obj.material = pyo.UnicodeObject.from(material, .cp1252) catch return null;
 
     return py_obj;
 }
@@ -427,7 +434,7 @@ export fn PyInit_x_rft_zig() callconv(.c) ?*py.PyObject {
     const mod = py.PyModule_Create(&module) orelse return null;
     
     //the PyMethodDef goes into the PyType_Slot which go into the PyType_Spec which goes into this
-    const type_obj = pyb.TypeObject.fromSpec(&terrain_type_spec) catch |err| switch (err) {
+    const type_obj = pyo.TypeObject.fromSpec(&terrain_type_spec) catch |err| switch (err) {
         error.Failed => {
             py.Py_DECREF(mod);
             return null;
@@ -436,8 +443,8 @@ export fn PyInit_x_rft_zig() callconv(.c) ?*py.PyObject {
 
     terrain_type = type_obj;
 
-    if (py.PyModule_AddObject(mod, "Terrain", type_obj.downcast(pyb.Object).ptr) < 0) {
-        py.Py_DECREF(type_obj.downcast(pyb.Object).ptr);
+    if (py.PyModule_AddObject(mod, "Terrain", type_obj.toObject().ptr) < 0) {
+        py.Py_DECREF(type_obj.toObject().ptr);
         py.Py_DECREF(mod);
         return null;
     }
