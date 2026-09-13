@@ -14,6 +14,7 @@ pub fn OnceSetterSafeGetter(T: type) type {
         
         pub fn set(self: *@This(), comptime tag: Field, value: @FieldType(T, @tagName(tag))) AlreadySetError!void {
             if (self.field_states.isSet(@intFromEnum(tag))) return error.AlreadySet;
+            self.field_states.set(@intFromEnum(tag));
             @field(self.fields, @tagName(tag)) = value;
         }
         

@@ -222,8 +222,8 @@ fn read_faces(arena: Allocator, fixed: *XaReader, meshmaps: MeshMapBundle, lengt
         .faces_n = faces_n,
         .faces = faces,
         .material_indices = material_indices,
-        .ints = try chunks.get(.ints),
-        .flags = try chunks.get(.flags),
+        .ints = chunks.get(.ints) catch &.{}, // Is defaulting to nothing appropriate here?
+        .flags = chunks.get(.flags) catch &.{},
     };
 }
 
