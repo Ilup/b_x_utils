@@ -58,7 +58,7 @@ pub const object_types = opaque {
         }
         
         pub fn setUnchecked(self: object_types.ListObject, item_i: usize, item: anytype) void {
-            _ = py.PyTuple_SetItem(self.toObject().ptr, @intCast(item_i), rawPtr(item));
+            _ = py.PyList_SetItem(self.toObject().ptr, @intCast(item_i), rawPtr(item));
         }
         
         pub fn set(self: object_types.ListObject, item_i: usize, item: anytype) OOR!void {
